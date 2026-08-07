@@ -8,7 +8,7 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Shi
     public ShineDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<ShineDbContext>()
-            .UseNpgsql("Host=localhost;Port=5432;Database=shine;Username=shine;Password=shine")
+            .UseNpgsql("Host=localhost;Port=5432;Database=shine;Username=shine;Password=Shine")
             .Options;
 
         return new ShineDbContext(options);
