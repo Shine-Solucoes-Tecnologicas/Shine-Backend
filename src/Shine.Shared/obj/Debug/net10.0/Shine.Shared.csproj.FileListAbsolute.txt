@@ -1,0 +1,12 @@
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\bin\Debug\net10.0\Shine.Shared.deps.json
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\bin\Debug\net10.0\Shine.Shared.dll
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\bin\Debug\net10.0\Shine.Shared.pdb
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.AssemblyInfoInputs.cache
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.AssemblyInfo.cs
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.csproj.CoreCompileInputs.cache
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.sourcelink.json
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.dll
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\refint\Shine.Shared.dll
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\Shine.Shared.pdb
+C:\Users\thayr\OneDrive\Documentos\Shine\Shine-Backend\src\Shine.Shared\obj\Debug\net10.0\ref\Shine.Shared.dll

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Shine.Api/Shine.Api.csproj" />
+    <Project Path="src/Shine.Application/Shine.Application.csproj" />
+    <Project Path="src/Shine.Domain/Shine.Domain.csproj" />
+    <Project Path="src/Shine.Infrastructure/Shine.Infrastructure.csproj" />
+    <Project Path="src/Shine.Shared/Shine.Shared.csproj" />
+  </Folder>
+</Solution>
