@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: shine
+      POSTGRES_USER: shine
+      POSTGRES_PASSWORD: shine
+    ports:
+      - "5432:5432"
+    volumes:
+      - shine-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  shine-postgres-data:

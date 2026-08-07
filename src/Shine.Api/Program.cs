@@ -4,7 +4,9 @@ using Shine.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure();
+var connectionString = builder.Configuration.GetConnectionString("ShineDb")
+    ?? throw new InvalidOperationException("Connection string 'ShineDb' was not configured.");
+builder.Services.AddInfrastructure(connectionString);
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
