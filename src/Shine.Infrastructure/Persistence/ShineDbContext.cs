@@ -1,18 +1,148 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using Shine.Domain;
 using Shine.Domain.Identity;
+using Shine.Domain.Authorization;
+using Microsoft.AspNetCore.Http;
 
 namespace Shine.Infrastructure.Persistence;
 
-public sealed class ShineDbContext(DbContextOptions<ShineDbContext> options) : DbContext(options)
+public sealed class ShineDbContext(
+    DbContextOptions<ShineDbContext> options,
+    ICurrentUser? currentUser = null,
+    ICurrentTenant? currentTenant = null,
+    ITenantExecutionContext? tenantExecutionContext = null,
+    IHttpContextAccessor? httpContextAccessor = null) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<UserTenant> UserTenants => Set<UserTenant>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<FunctionalSetting> FunctionalSettings => Set<FunctionalSetting>();
+    public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
+    public DbSet<ModuleAccess> ModuleAccesses => Set<ModuleAccess>();
+    public DbSet<Plan> Plans => Set<Plan>();
+    public DbSet<PlanModule> PlanModules => Set<PlanModule>();
+    public DbSet<TenantPlan> TenantPlans => Set<TenantPlan>();
+    public DbSet<TenantModuleOverride> TenantModuleOverrides => Set<TenantModuleOverride>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<UserTenantRole> UserTenantRoles => Set<UserTenantRole>();
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ApplyAuditMetadata();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ApplyAuditMetadata();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ApplyAuditMetadata()
+    {
+        var userId = currentUser?.UserId;
+        var tenantId = currentTenant?.TenantId;
+        var now = DateTime.UtcNow;
+
+        foreach (var entry in ChangeTracker.Entries()
+                     .Where(entry => entry.Metadata.ClrType != typeof(AuditEntry))
+                     .ToArray())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            if (entry.State == EntityState.Deleted && entry.Entity is ISoftDeletable softDeletable)
+            {
+                softDeletable.Delete(DateTime.UtcNow);
+                entry.State = EntityState.Modified;
+            }
+
+            ApplyTenantBoundary(entry);
+
+            var action = entry.State switch
+            {
+                EntityState.Added => "CREATE",
+                EntityState.Modified => "UPDATE",
+                _ => "DELETE"
+            };
+
+            if (entry.Entity is AuditableEntity auditable)
+            {
+                if (entry.State == EntityState.Added)
+                    auditable.MarkCreated(userId, tenantId, now);
+                else if (entry.State == EntityState.Modified)
+                    auditable.MarkUpdated(userId, now);
+            }
+
+            var key = entry.Metadata.FindPrimaryKey()?.Properties
+                .Select(property => entry.Property(property.Name).CurrentValue?.ToString())
+                .Where(value => value is not null)
+                .ToArray();
+            var entityId = key is { Length: > 0 } ? string.Join("/", key) : "pending";
+            var values = entry.Properties.ToDictionary(property => property.Metadata.Name, property => MaskSensitive(property.Metadata.Name, property.CurrentValue));
+            var oldValues = entry.State == EntityState.Added ? null : entry.Properties.ToDictionary(property => property.Metadata.Name, property => MaskSensitive(property.Metadata.Name, property.OriginalValue));
+            var httpContext = httpContextAccessor?.HttpContext;
+
+            AuditEntries.Add(AuditEntry.Create(
+                entry.Metadata.ClrType.Name,
+                entityId,
+                action,
+                userId,
+                tenantId,
+                now,
+                httpContext?.TraceIdentifier,
+                httpContext?.Connection.RemoteIpAddress?.ToString(),
+                httpContext?.Request.Headers.UserAgent.ToString(),
+                oldValues is null ? null : JsonSerializer.Serialize(oldValues),
+                JsonSerializer.Serialize(values)));
+        }
+    }
+
+    private void ApplyTenantBoundary(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
+    {
+        if (tenantExecutionContext?.IsBypass == true || entry.Entity is not IMultiTenantEntity || currentTenant?.TenantId is not Guid tenantId)
+            return;
+
+        var tenantProperty = entry.Metadata.FindProperty(nameof(IMultiTenantEntity.TenantId));
+        if (tenantProperty is null)
+            return;
+
+        var currentValue = entry.Property(tenantProperty.Name).CurrentValue;
+        if (currentValue is Guid existingTenant && existingTenant != Guid.Empty && existingTenant != tenantId)
+            throw new TenantIsolationException("The entity belongs to another tenant.");
+
+        if (entry.State == EntityState.Added)
+            entry.Property(tenantProperty.Name).CurrentValue = tenantId;
+        else if (currentValue is Guid existing && existing != tenantId)
+            throw new TenantIsolationException("The entity belongs to another tenant.");
+    }
+
+    private static object? MaskSensitive(string propertyName, object? value)
+    {
+        if (value is null) return null;
+
+        var sensitive = propertyName.Contains("password", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("token", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("secret", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("credential", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("privatekey", StringComparison.OrdinalIgnoreCase);
+
+        return sensitive ? "[MASKED]" : value;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Notification>()
+            .HasQueryFilter(notification => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null ||
+                currentTenant.TenantId == null || notification.TenantId == currentTenant.TenantId.Value);
+
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(user => user.Id);
@@ -40,6 +170,8 @@ public sealed class ShineDbContext(DbContextOptions<ShineDbContext> options) : D
         modelBuilder.Entity<UserTenant>(entity =>
         {
             entity.HasKey(link => new { link.UserId, link.TenantId });
+            entity.Property(link => link.UserTenantId).IsRequired();
+            entity.HasIndex(link => link.UserTenantId).IsUnique();
             entity.HasOne(link => link.User).WithMany(user => user.Tenants).HasForeignKey(link => link.UserId);
             entity.HasOne(link => link.Tenant).WithMany(tenant => tenant.Users).HasForeignKey(link => link.TenantId);
             entity.HasIndex(link => new { link.TenantId, link.UserId }).IsUnique();
@@ -49,8 +181,98 @@ public sealed class ShineDbContext(DbContextOptions<ShineDbContext> options) : D
         {
             entity.HasKey(token => token.Id);
             entity.Property(token => token.TokenHash).HasMaxLength(128).IsRequired();
+            entity.HasIndex(token => token.UserTenantId);
             entity.HasIndex(token => token.TokenHash).IsUnique();
             entity.HasOne(token => token.User).WithMany().HasForeignKey(token => token.UserId);
         });
+
+        modelBuilder.Entity<Permission>(entity =>
+        {
+            entity.HasKey(permission => permission.Id);
+            entity.Property(permission => permission.Code).HasMaxLength(120).IsRequired();
+            entity.Property(permission => permission.Description).HasMaxLength(300).IsRequired();
+            entity.HasIndex(permission => permission.Code).IsUnique();
+        });
+
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(role => role.Id);
+            entity.Property(role => role.Name).HasMaxLength(120).IsRequired();
+            entity.HasIndex(role => new { role.TenantId, role.Name }).IsUnique();
+            entity.HasOne(role => role.Tenant).WithMany().HasForeignKey(role => role.TenantId);
+            entity.HasQueryFilter(role => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || role.TenantId == currentTenant.TenantId.Value);
+        });
+
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.HasKey(link => new { link.RoleId, link.PermissionId });
+            entity.HasOne(link => link.Role).WithMany(role => role.Permissions).HasForeignKey(link => link.RoleId);
+            entity.HasOne(link => link.Permission).WithMany(permission => permission.Roles).HasForeignKey(link => link.PermissionId);
+        });
+
+        modelBuilder.Entity<UserTenantRole>(entity =>
+        {
+            entity.HasKey(link => new { link.UserId, link.TenantId, link.RoleId });
+            entity.HasOne(link => link.User).WithMany().HasForeignKey(link => link.UserId);
+            entity.HasOne(link => link.TenantMembership).WithMany().HasForeignKey(link => new { link.UserId, link.TenantId });
+            entity.HasOne(link => link.Role).WithMany(role => role.Users).HasForeignKey(link => link.RoleId);
+            entity.HasQueryFilter(link => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || link.TenantId == currentTenant.TenantId.Value);
+        });
+
+        modelBuilder.Entity<AuditEntry>(entity =>
+        {
+            entity.HasKey(entry => entry.Id);
+            entity.Property(entry => entry.EntityType).HasMaxLength(200).IsRequired();
+            entity.Property(entry => entry.EntityId).HasMaxLength(100).IsRequired();
+            entity.Property(entry => entry.Action).HasMaxLength(30).IsRequired();
+            entity.Property(entry => entry.CorrelationId).HasMaxLength(100);
+            entity.Property(entry => entry.IpAddress).HasMaxLength(64);
+            entity.Property(entry => entry.UserAgent).HasMaxLength(512);
+            entity.Property(entry => entry.OldValuesJson).HasColumnType("jsonb");
+            entity.Property(entry => entry.NewValuesJson).HasColumnType("jsonb");
+            entity.HasIndex(entry => new { entry.TenantId, entry.EntityType, entry.EntityId });
+            entity.HasIndex(entry => entry.OccurredAtUtc);
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasKey(notification => notification.Id);
+            entity.Property(notification => notification.Type).HasMaxLength(80).IsRequired();
+            entity.Property(notification => notification.Title).HasMaxLength(200).IsRequired();
+            entity.Property(notification => notification.Message).HasMaxLength(2000).IsRequired();
+            entity.Property(notification => notification.DataJson).HasColumnType("jsonb");
+            entity.HasIndex(notification => new { notification.TenantId, notification.RecipientUserId, notification.ReadAtUtc });
+            entity.HasQueryFilter(notification => !notification.IsDeleted &&
+                (tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null ||
+                 currentTenant.TenantId == null || notification.TenantId == currentTenant.TenantId.Value));
+        });
+
+        modelBuilder.Entity<FunctionalSetting>(entity =>
+        {
+            entity.HasKey(setting => setting.Id);
+            entity.Property(setting => setting.Key).HasMaxLength(120).IsRequired();
+            entity.Property(setting => setting.Value).HasMaxLength(4000).IsRequired();
+            entity.HasIndex(setting => new { setting.TenantId, setting.Key }).IsUnique();
+        });
+
+        modelBuilder.Entity<FeatureFlag>(entity =>
+        {
+            entity.HasKey(flag => flag.Id);
+            entity.Property(flag => flag.Key).HasMaxLength(120).IsRequired();
+            entity.HasIndex(flag => new { flag.TenantId, flag.Key }).IsUnique();
+        });
+
+        modelBuilder.Entity<ModuleAccess>(entity =>
+        {
+            entity.HasKey(access => access.Id);
+            entity.Property(access => access.ModuleCode).HasMaxLength(120).IsRequired();
+            entity.HasIndex(access => new { access.TenantId, access.ModuleCode }).IsUnique();
+            entity.HasQueryFilter(access => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || access.TenantId == currentTenant.TenantId.Value);
+        });
+
+        modelBuilder.Entity<Plan>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Code).HasMaxLength(120).IsRequired(); entity.Property(x => x.Name).HasMaxLength(200).IsRequired(); entity.HasIndex(x => x.Code).IsUnique(); });
+        modelBuilder.Entity<PlanModule>(entity => { entity.HasKey(x => new { x.PlanId, x.ModuleCode }); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasOne<Plan>().WithMany(x => x.Modules).HasForeignKey(x => x.PlanId); });
+        modelBuilder.Entity<TenantPlan>(entity => { entity.HasKey(x => x.Id); entity.HasIndex(x => x.TenantId).IsUnique(); });
+        modelBuilder.Entity<TenantModuleOverride>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.ModuleCode }).IsUnique(); });
     }
 }

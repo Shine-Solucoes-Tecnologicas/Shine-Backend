@@ -46,6 +46,11 @@ public sealed class PasswordRecoveryController(
 
         token.User.ChangePassword(passwordHashService.Hash(request.NewPassword));
         token.MarkUsed(DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        var sessions = await dbContext.RefreshTokens
+            .Where(item => item.UserId == token.UserId && item.RevokedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (var session in sessions) session.Revoke(now);
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
     }

@@ -15,7 +15,9 @@ Nenhum módulo funcional foi criado nesta etapa.
 ## Executar
 
 ```bash
-export ConnectionStrings__ShineDb='Host=localhost;Port=5432;Database=shine;Username=shine;Password=change-me'
+docker compose up -d
+export ConnectionStrings__ShineDb='Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
+dotnet ef database update --project src/Shine.Infrastructure --startup-project src/Shine.Api
 dotnet run --project src/Shine.Api
 ```
 

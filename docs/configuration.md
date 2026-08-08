@@ -8,8 +8,17 @@ As configurações técnicas são carregadas por ambiente usando o sistema de co
 
 Exemplo para desenvolvimento (não use uma senha real no repositório):
 
+## Ambiente local com Docker
+
+O PostgreSQL do projeto roda via Docker Compose na porta `5433` do Windows,
+evitando conflito com uma instalaÃ§Ã£o local na porta `5432`.
+
 ```powershell
-$env:ConnectionStrings__ShineDb = 'Host=localhost;Port=5432;Database=shine;Username=shine;Password=change-me'
+docker compose up -d
+docker compose ps
+docker exec shine-backend-postgres-1 pg_isready -U shine -d shine
+$env:ConnectionStrings__ShineDb = 'Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
+dotnet ef database update --project src/Shine.Infrastructure --startup-project src/Shine.Api
 dotnet run --project src/Shine.Api
 ```
 

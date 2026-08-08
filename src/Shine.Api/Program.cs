@@ -21,7 +21,6 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
         return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(new { errors });
     };
 });
-builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
@@ -30,11 +29,6 @@ app.UseMiddleware<RequestDiagnosticsMiddleware>();
 app.UseMiddleware<JwtAuthenticationMiddleware>();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
 app.MapControllers();
 app.MapHealthChecks("/health");
 app.Run();
