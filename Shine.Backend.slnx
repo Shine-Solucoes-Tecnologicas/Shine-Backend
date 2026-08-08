@@ -5,5 +5,7 @@
     <Project Path="src/Shine.Domain/Shine.Domain.csproj" />
     <Project Path="src/Shine.Infrastructure/Shine.Infrastructure.csproj" />
     <Project Path="src/Shine.Shared/Shine.Shared.csproj" />
+    <Project Path="tests/Shine.UnitTests/Shine.UnitTests.csproj" />
+    <Project Path="tests/Shine.IntegrationTests/Shine.IntegrationTests.csproj" />
   </Folder>
 </Solution>

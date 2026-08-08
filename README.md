@@ -15,7 +15,10 @@ Nenhum módulo funcional foi criado nesta etapa.
 ## Executar
 
 ```bash
+export ConnectionStrings__ShineDb='Host=localhost;Port=5432;Database=shine;Username=shine;Password=change-me'
 dotnet run --project src/Shine.Api
 ```
+
+Consulte [docs/configuration.md](docs/configuration.md) para a configuração por ambiente.
 
 Valide a API em `GET /api/health`.

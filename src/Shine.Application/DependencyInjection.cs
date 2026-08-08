@@ -4,5 +4,9 @@ namespace Shine.Application;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddApplication(this IServiceCollection services) => services;
+    public static IServiceCollection AddApplication(this IServiceCollection services)
+    {
+        services.AddSingleton<IValidationService, DataAnnotationsValidationService>();
+        return services;
+    }
 }
