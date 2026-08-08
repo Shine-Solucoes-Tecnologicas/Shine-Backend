@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: shine
       POSTGRES_PASSWORD: shine
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - shine-postgres-data:/var/lib/postgresql/data
 

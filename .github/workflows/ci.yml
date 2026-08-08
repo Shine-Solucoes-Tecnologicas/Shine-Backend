@@ -29,4 +29,11 @@ jobs:
         run: dotnet build Shine.Backend.slnx --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test Shine.Backend.slnx --no-build --configuration Release --verbosity normal
+        run: dotnet test Shine.Backend.slnx --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: error

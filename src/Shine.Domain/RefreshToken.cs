@@ -4,10 +4,12 @@ public sealed class RefreshToken
 {
     private RefreshToken() { }
 
-    public RefreshToken(Guid userId, string tokenHash, DateTime expiresAtUtc)
+    public RefreshToken(Guid userId, Guid? tenantId, Guid? userTenantId, string tokenHash, DateTime expiresAtUtc)
     {
         Id = Guid.NewGuid();
         UserId = userId;
+        TenantId = tenantId;
+        UserTenantId = userTenantId;
         TokenHash = tokenHash;
         ExpiresAtUtc = expiresAtUtc;
         CreatedAtUtc = DateTime.UtcNow;
@@ -15,6 +17,8 @@ public sealed class RefreshToken
 
     public Guid Id { get; private set; }
     public Guid UserId { get; private set; }
+    public Guid? TenantId { get; private set; }
+    public Guid? UserTenantId { get; private set; }
     public User User { get; private set; } = null!;
     public string TokenHash { get; private set; } = null!;
     public DateTime CreatedAtUtc { get; private set; }

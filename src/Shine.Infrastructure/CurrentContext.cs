@@ -14,6 +14,7 @@ public interface ICurrentTenant
     Guid? TenantId { get; }
     Guid? UserTenantId { get; }
     IReadOnlyCollection<string> Roles { get; }
+    bool HasCompleteContext { get; }
 }
 
 public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
@@ -30,6 +31,7 @@ public sealed class CurrentTenant(IHttpContextAccessor accessor) : ICurrentTenan
     public Guid? TenantId => ReadGuid("tenant_id");
     public Guid? UserTenantId => ReadGuid("user_tenant_id");
     public IReadOnlyCollection<string> Roles => accessor.HttpContext?.User.FindAll("role").Select(claim => claim.Value).ToArray() ?? [];
+    public bool HasCompleteContext => TenantId is not null && UserTenantId is not null;
 
     private Guid? ReadGuid(string claimType) =>
         Guid.TryParse(accessor.HttpContext?.User.FindFirst(claimType)?.Value, out var value) ? value : null;

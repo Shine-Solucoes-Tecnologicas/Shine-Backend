@@ -3,13 +3,47 @@ using Microsoft.EntityFrameworkCore;
 using Shine.Domain.Identity;
 using Shine.Infrastructure.Persistence;
 using Shine.Infrastructure;
+using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace Shine.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public sealed class AuthenticationController(ShineDbContext dbContext, IPasswordHashService passwordHashService, IAccessTokenService accessTokenService) : ControllerBase
+public sealed class AuthenticationController(ShineDbContext dbContext, IPasswordHashService passwordHashService, IAccessTokenService accessTokenService, IOptions<JwtOptions> jwtOptions) : ControllerBase
 {
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(RefreshRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.RefreshToken)) return NoContent();
+
+        var token = await dbContext.RefreshTokens
+            .SingleOrDefaultAsync(item => item.TokenHash == RefreshTokenHash.Hash(request.RefreshToken), cancellationToken);
+        if (token is not null && token.IsActive(DateTime.UtcNow))
+            token.Revoke(DateTime.UtcNow);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost("logout-all")]
+    public async Task<IActionResult> LogoutAll(CancellationToken cancellationToken)
+    {
+        var userIdValue = User.FindFirstValue("user_id") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdValue, out var userId)) return Unauthorized();
+
+        var now = DateTime.UtcNow;
+        var sessions = await dbContext.RefreshTokens
+            .Where(item => item.UserId == userId && item.RevokedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (var session in sessions) session.Revoke(now);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("login")]
     [ProducesResponseType<LoginResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -24,9 +58,47 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
         if (user is null || !user.IsActive || !passwordHashService.Verify(request.Password, user.PasswordHash))
             return Unauthorized();
 
-        var tenants = user.Tenants.Where(link => link.IsActive && link.Tenant.IsActive)
+        var accessibleLinks = user.Tenants.Where(link => link.IsActive && link.Tenant.IsActive).ToArray();
+        var tenants = accessibleLinks
             .Select(link => new AccessibleTenantResponse(link.Tenant.Id, link.Tenant.Name)).ToArray();
-        var accessToken = accessTokenService.Create(user.Id, null, null, []);
-        return Ok(new LoginResponse(user.Id, user.Email, tenants, accessToken.Token, accessToken.ExpiresAtUtc));
+        Guid? tenantId = null;
+        Guid? userTenantId = null;
+        IReadOnlyCollection<string> roles = [];
+        if (accessibleLinks is [{ } singleLink])
+        {
+            tenantId = singleLink.TenantId;
+            userTenantId = singleLink.UserTenantId;
+            roles = await dbContext.UserTenantRoles
+                .AsNoTracking()
+                .Where(item => item.UserId == user.Id && item.TenantId == singleLink.TenantId)
+                .Select(item => item.Role.Name)
+                .Distinct()
+                .ToArrayAsync(cancellationToken);
+        }
+        var accessToken = accessTokenService.Create(user.Id, tenantId, userTenantId, roles);
+        var refresh = RefreshTokenHash.Create();
+        dbContext.RefreshTokens.Add(new RefreshToken(user.Id, tenantId, userTenantId, refresh.Hash, DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays)));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(new LoginResponse(user.Id, user.Email, tenants, accessToken.Token, accessToken.ExpiresAtUtc, refresh.Raw));
+    }
+
+    [HttpPost("refresh")]
+    public async Task<ActionResult<RefreshResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken)
+    {
+        var current = await dbContext.RefreshTokens.Include(item => item.User).SingleOrDefaultAsync(item => item.TokenHash == RefreshTokenHash.Hash(request.RefreshToken), cancellationToken);
+        if (current is null || !current.IsActive(DateTime.UtcNow) || !current.User.IsActive) return Unauthorized();
+        var replacement = RefreshTokenHash.Create();
+        current.Revoke(DateTime.UtcNow, replacement.Hash);
+        var next = new RefreshToken(current.UserId, current.TenantId, current.UserTenantId, replacement.Hash, DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays));
+        dbContext.RefreshTokens.Add(next);
+        var roles = current.TenantId is Guid tenantId
+            ? await dbContext.UserTenantRoles.Where(item => item.UserId == current.UserId && item.TenantId == tenantId).Select(item => item.Role.Name).Distinct().ToArrayAsync(cancellationToken)
+            : [];
+        var access = accessTokenService.Create(current.UserId, current.TenantId, current.UserTenantId, roles);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(new RefreshResponse(access.Token, access.ExpiresAtUtc, replacement.Raw));
     }
 }
+
+public sealed record RefreshRequest(string RefreshToken);
+public sealed record RefreshResponse(string AccessToken, DateTime AccessTokenExpiresAtUtc, string RefreshToken);

@@ -5,9 +5,27 @@ public interface IEntity<out TId>
     TId Id { get; }
 }
 
-public abstract class BaseEntity<TId>(TId id) : IEntity<TId>
+public interface IDomainEvent { }
+
+public interface IHasDomainEvents
+{
+    IReadOnlyCollection<IDomainEvent> DomainEvents { get; }
+    void AddDomainEvent(IDomainEvent domainEvent);
+    IReadOnlyCollection<IDomainEvent> ClearDomainEvents();
+}
+
+public abstract class BaseEntity<TId>(TId id) : IEntity<TId>, IHasDomainEvents
 {
     public TId Id { get; protected init; } = id;
+    private readonly List<IDomainEvent> domainEvents = [];
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => domainEvents.AsReadOnly();
+    public void AddDomainEvent(IDomainEvent domainEvent) => domainEvents.Add(domainEvent ?? throw new ArgumentNullException(nameof(domainEvent)));
+    public IReadOnlyCollection<IDomainEvent> ClearDomainEvents()
+    {
+        var pending = domainEvents.ToArray();
+        domainEvents.Clear();
+        return pending;
+    }
 }
 
 public interface IAggregateRoot { }

@@ -6,6 +6,7 @@ public sealed class UserTenant
 
     public UserTenant(Guid userId, Guid tenantId, Guid createdByUserId, bool isOwner)
     {
+        UserTenantId = Guid.NewGuid();
         UserId = userId;
         TenantId = tenantId;
         CreatedByUserId = createdByUserId;
@@ -14,6 +15,7 @@ public sealed class UserTenant
         CreatedAtUtc = DateTime.UtcNow;
     }
 
+    public Guid UserTenantId { get; private set; }
     public Guid UserId { get; private set; }
     public User User { get; private set; } = null!;
     public Guid TenantId { get; private set; }
@@ -22,4 +24,7 @@ public sealed class UserTenant
     public bool IsOwner { get; private set; }
     public bool IsActive { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
+
+    public void Deactivate() => IsActive = false;
+    public void Reactivate() => IsActive = true;
 }
