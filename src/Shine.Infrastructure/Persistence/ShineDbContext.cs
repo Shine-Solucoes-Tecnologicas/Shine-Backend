@@ -12,7 +12,9 @@ public sealed class ShineDbContext(
     ICurrentUser? currentUser = null,
     ICurrentTenant? currentTenant = null,
     ITenantExecutionContext? tenantExecutionContext = null,
-    IHttpContextAccessor? httpContextAccessor = null) : DbContext(options)
+    IHttpContextAccessor? httpContextAccessor = null,
+    IClock? clock = null,
+    IDomainEventDispatcher? domainEventDispatcher = null) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -32,24 +34,56 @@ public sealed class ShineDbContext(
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserTenantRole> UserTenantRoles => Set<UserTenantRole>();
+    public DbSet<GlobalRole> GlobalRoles => Set<GlobalRole>();
+    public DbSet<GlobalRolePermission> GlobalRolePermissions => Set<GlobalRolePermission>();
+    public DbSet<UserGlobalRole> UserGlobalRoles => Set<UserGlobalRole>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        var aggregates = PendingAggregates();
         ApplyAuditMetadata();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var result = base.SaveChanges(acceptAllChangesOnSuccess);
+        PublishEvents(aggregates);
+        return result;
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        var aggregates = PendingAggregates();
         ApplyAuditMetadata();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        return SaveAndPublishAsync(aggregates, acceptAllChangesOnSuccess, cancellationToken);
     }
+
+    private async Task<int> SaveAndPublishAsync(IReadOnlyCollection<IHasDomainEvents> aggregates, bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+    {
+        var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        await PublishEventsAsync(aggregates, cancellationToken);
+        return result;
+    }
+
+    private IReadOnlyCollection<IHasDomainEvents> PendingAggregates() => ChangeTracker.Entries()
+        .Select(entry => entry.Entity)
+        .OfType<IHasDomainEvents>()
+        .Where(aggregate => aggregate.DomainEvents.Count > 0)
+        .Distinct()
+        .ToArray();
+
+    private void PublishEvents(IReadOnlyCollection<IHasDomainEvents> aggregates)
+    {
+        if (domainEventDispatcher is null || aggregates.Count == 0) return;
+        domainEventDispatcher.PublishAsync(aggregates).GetAwaiter().GetResult();
+    }
+
+    private Task PublishEventsAsync(IReadOnlyCollection<IHasDomainEvents> aggregates, CancellationToken cancellationToken) =>
+        domainEventDispatcher is null || aggregates.Count == 0
+            ? Task.CompletedTask
+            : domainEventDispatcher.PublishAsync(aggregates, cancellationToken);
 
     private void ApplyAuditMetadata()
     {
         var userId = currentUser?.UserId;
         var tenantId = currentTenant?.TenantId;
-        var now = DateTime.UtcNow;
+        var now = clock?.UtcNow ?? DateTime.UtcNow;
 
         foreach (var entry in ChangeTracker.Entries()
                      .Where(entry => entry.Metadata.ClrType != typeof(AuditEntry))
@@ -60,7 +94,7 @@ public sealed class ShineDbContext(
 
             if (entry.State == EntityState.Deleted && entry.Entity is ISoftDeletable softDeletable)
             {
-                softDeletable.Delete(DateTime.UtcNow);
+                softDeletable.Delete(now);
                 entry.State = EntityState.Modified;
             }
 
@@ -141,7 +175,7 @@ public sealed class ShineDbContext(
     {
         modelBuilder.Entity<Notification>()
             .HasQueryFilter(notification => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null ||
-                currentTenant.TenantId == null || notification.TenantId == currentTenant.TenantId.Value);
+                currentTenant.TenantId == null || notification.TenantId == currentTenant.TenantId);
 
         modelBuilder.Entity<User>(entity =>
         {
@@ -200,7 +234,7 @@ public sealed class ShineDbContext(
             entity.Property(role => role.Name).HasMaxLength(120).IsRequired();
             entity.HasIndex(role => new { role.TenantId, role.Name }).IsUnique();
             entity.HasOne(role => role.Tenant).WithMany().HasForeignKey(role => role.TenantId);
-            entity.HasQueryFilter(role => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || role.TenantId == currentTenant.TenantId.Value);
+            entity.HasQueryFilter(role => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || role.TenantId == currentTenant.TenantId);
         });
 
         modelBuilder.Entity<RolePermission>(entity =>
@@ -216,14 +250,35 @@ public sealed class ShineDbContext(
             entity.HasOne(link => link.User).WithMany().HasForeignKey(link => link.UserId);
             entity.HasOne(link => link.TenantMembership).WithMany().HasForeignKey(link => new { link.UserId, link.TenantId });
             entity.HasOne(link => link.Role).WithMany(role => role.Users).HasForeignKey(link => link.RoleId);
-            entity.HasQueryFilter(link => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || link.TenantId == currentTenant.TenantId.Value);
+            entity.HasQueryFilter(link => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || link.TenantId == currentTenant.TenantId);
+        });
+
+        modelBuilder.Entity<GlobalRole>(entity =>
+        {
+            entity.HasKey(role => role.Id);
+            entity.Property(role => role.Name).HasMaxLength(120).IsRequired();
+            entity.HasIndex(role => role.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<GlobalRolePermission>(entity =>
+        {
+            entity.HasKey(link => new { link.RoleId, link.PermissionId });
+            entity.HasOne(link => link.Role).WithMany(role => role.Permissions).HasForeignKey(link => link.RoleId);
+            entity.HasOne(link => link.Permission).WithMany().HasForeignKey(link => link.PermissionId);
+        });
+
+        modelBuilder.Entity<UserGlobalRole>(entity =>
+        {
+            entity.HasKey(link => new { link.UserId, link.RoleId });
+            entity.HasOne(link => link.User).WithMany().HasForeignKey(link => link.UserId);
+            entity.HasOne(link => link.Role).WithMany(role => role.Users).HasForeignKey(link => link.RoleId);
         });
 
         modelBuilder.Entity<AuditEntry>(entity =>
         {
             entity.HasKey(entry => entry.Id);
             entity.Property(entry => entry.EntityType).HasMaxLength(200).IsRequired();
-            entity.Property(entry => entry.EntityId).HasMaxLength(100).IsRequired();
+            entity.Property(entry => entry.EntityId).HasMaxLength(256).IsRequired();
             entity.Property(entry => entry.Action).HasMaxLength(30).IsRequired();
             entity.Property(entry => entry.CorrelationId).HasMaxLength(100);
             entity.Property(entry => entry.IpAddress).HasMaxLength(64);
@@ -244,7 +299,7 @@ public sealed class ShineDbContext(
             entity.HasIndex(notification => new { notification.TenantId, notification.RecipientUserId, notification.ReadAtUtc });
             entity.HasQueryFilter(notification => !notification.IsDeleted &&
                 (tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null ||
-                 currentTenant.TenantId == null || notification.TenantId == currentTenant.TenantId.Value));
+                 currentTenant.TenantId == null || notification.TenantId == currentTenant.TenantId));
         });
 
         modelBuilder.Entity<FunctionalSetting>(entity =>
@@ -253,6 +308,7 @@ public sealed class ShineDbContext(
             entity.Property(setting => setting.Key).HasMaxLength(120).IsRequired();
             entity.Property(setting => setting.Value).HasMaxLength(4000).IsRequired();
             entity.HasIndex(setting => new { setting.TenantId, setting.Key }).IsUnique();
+            entity.HasQueryFilter(setting => !setting.IsDeleted);
         });
 
         modelBuilder.Entity<FeatureFlag>(entity =>
@@ -260,6 +316,7 @@ public sealed class ShineDbContext(
             entity.HasKey(flag => flag.Id);
             entity.Property(flag => flag.Key).HasMaxLength(120).IsRequired();
             entity.HasIndex(flag => new { flag.TenantId, flag.Key }).IsUnique();
+            entity.HasQueryFilter(flag => !flag.IsDeleted);
         });
 
         modelBuilder.Entity<ModuleAccess>(entity =>
@@ -267,12 +324,12 @@ public sealed class ShineDbContext(
             entity.HasKey(access => access.Id);
             entity.Property(access => access.ModuleCode).HasMaxLength(120).IsRequired();
             entity.HasIndex(access => new { access.TenantId, access.ModuleCode }).IsUnique();
-            entity.HasQueryFilter(access => tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || access.TenantId == currentTenant.TenantId.Value);
+            entity.HasQueryFilter(access => !access.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass || currentTenant == null || currentTenant.TenantId == null || access.TenantId == currentTenant.TenantId));
         });
 
-        modelBuilder.Entity<Plan>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Code).HasMaxLength(120).IsRequired(); entity.Property(x => x.Name).HasMaxLength(200).IsRequired(); entity.HasIndex(x => x.Code).IsUnique(); });
+        modelBuilder.Entity<Plan>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Code).HasMaxLength(120).IsRequired(); entity.Property(x => x.Name).HasMaxLength(200).IsRequired(); entity.HasIndex(x => x.Code).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
         modelBuilder.Entity<PlanModule>(entity => { entity.HasKey(x => new { x.PlanId, x.ModuleCode }); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasOne<Plan>().WithMany(x => x.Modules).HasForeignKey(x => x.PlanId); });
-        modelBuilder.Entity<TenantPlan>(entity => { entity.HasKey(x => x.Id); entity.HasIndex(x => x.TenantId).IsUnique(); });
-        modelBuilder.Entity<TenantModuleOverride>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.ModuleCode }).IsUnique(); });
+        modelBuilder.Entity<TenantPlan>(entity => { entity.HasKey(x => x.Id); entity.HasIndex(x => x.TenantId).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
+        modelBuilder.Entity<TenantModuleOverride>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.ModuleCode }).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
     }
 }

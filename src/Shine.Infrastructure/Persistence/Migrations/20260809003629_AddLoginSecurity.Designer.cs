@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Shine.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Shine.Infrastructure.Persistence;
 namespace Shine.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ShineDbContext))]
-    partial class ShineDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260809003629_AddLoginSecurity")]
+    partial class AddLoginSecurity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -82,40 +85,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.ToTable("AuditEntries");
                 });
 
-            modelBuilder.Entity("Shine.Domain.Authorization.GlobalRole", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("GlobalRoles");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Authorization.GlobalRolePermission", b =>
-                {
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PermissionId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("RoleId", "PermissionId");
-
-                    b.HasIndex("PermissionId");
-
-                    b.ToTable("GlobalRolePermissions");
-                });
-
             modelBuilder.Entity("Shine.Domain.Authorization.Permission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -178,21 +147,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.HasIndex("PermissionId");
 
                     b.ToTable("RolePermissions");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Authorization.UserGlobalRole", b =>
-                {
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("UserId", "RoleId");
-
-                    b.HasIndex("RoleId");
-
-                    b.ToTable("UserGlobalRoles");
                 });
 
             modelBuilder.Entity("Shine.Domain.Authorization.UserTenantRole", b =>
@@ -400,15 +354,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("SuspendedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("SuspendedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("SuspensionReason")
-                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -745,25 +690,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.ToTable("TenantPlans");
                 });
 
-            modelBuilder.Entity("Shine.Domain.Authorization.GlobalRolePermission", b =>
-                {
-                    b.HasOne("Shine.Domain.Authorization.Permission", "Permission")
-                        .WithMany()
-                        .HasForeignKey("PermissionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Authorization.GlobalRole", "Role")
-                        .WithMany("Permissions")
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Permission");
-
-                    b.Navigation("Role");
-                });
-
             modelBuilder.Entity("Shine.Domain.Authorization.Role", b =>
                 {
                     b.HasOne("Shine.Domain.Identity.Tenant", "Tenant")
@@ -792,25 +718,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Navigation("Permission");
 
                     b.Navigation("Role");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Authorization.UserGlobalRole", b =>
-                {
-                    b.HasOne("Shine.Domain.Authorization.GlobalRole", "Role")
-                        .WithMany("Users")
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Identity.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Role");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Shine.Domain.Authorization.UserTenantRole", b =>
@@ -888,13 +795,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PlanId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("Shine.Domain.Authorization.GlobalRole", b =>
-                {
-                    b.Navigation("Permissions");
-
-                    b.Navigation("Users");
                 });
 
             modelBuilder.Entity("Shine.Domain.Authorization.Permission", b =>

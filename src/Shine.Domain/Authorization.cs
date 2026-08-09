@@ -19,6 +19,7 @@ public sealed class Role : IMultiTenantEntity
 {
     public const string OwnerName = "Owner";
     public const string AdministratorName = "Administrator";
+    public const string MemberName = "Member";
     private Role() { }
     public Role(Guid tenantId, string name, bool isSystem = false)
     {
@@ -54,4 +55,43 @@ public sealed class UserTenantRole : IMultiTenantEntity
     public User User { get; private set; } = null!;
     public UserTenant TenantMembership { get; private set; } = null!;
     public Role Role { get; private set; } = null!;
+}
+
+public sealed class GlobalRole
+{
+    public const string PlatformAdminName = "PlatformAdmin";
+    public const string SupportName = "Support";
+    public const string AuditorName = "Auditor";
+
+    private GlobalRole() { }
+    public GlobalRole(string name)
+    {
+        Id = Guid.NewGuid();
+        Name = name.Trim();
+    }
+
+    public Guid Id { get; private set; }
+    public string Name { get; private set; } = null!;
+    public ICollection<GlobalRolePermission> Permissions { get; private set; } = new List<GlobalRolePermission>();
+    public ICollection<UserGlobalRole> Users { get; private set; } = new List<UserGlobalRole>();
+}
+
+public sealed class GlobalRolePermission
+{
+    private GlobalRolePermission() { }
+    public GlobalRolePermission(Guid roleId, Guid permissionId) { RoleId = roleId; PermissionId = permissionId; }
+    public Guid RoleId { get; private set; }
+    public Guid PermissionId { get; private set; }
+    public GlobalRole Role { get; private set; } = null!;
+    public Permission Permission { get; private set; } = null!;
+}
+
+public sealed class UserGlobalRole
+{
+    private UserGlobalRole() { }
+    public UserGlobalRole(Guid userId, Guid roleId) { UserId = userId; RoleId = roleId; }
+    public Guid UserId { get; private set; }
+    public Guid RoleId { get; private set; }
+    public User User { get; private set; } = null!;
+    public GlobalRole Role { get; private set; } = null!;
 }

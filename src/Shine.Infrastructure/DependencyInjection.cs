@@ -25,6 +25,7 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
         services.AddOptions<JwtOptions>().BindConfiguration("Jwt");
+        services.AddOptions<LoginSecurityOptions>().BindConfiguration("LoginSecurity");
         services.AddSingleton<IAccessTokenService, HmacAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
         services.AddHttpContextAccessor();

@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.Text.Json;
 
 namespace Shine.Api.Controllers;
 
 [ApiController]
+[AllowAnonymous]
 [Route("api/health")]
 public sealed class HealthController : ControllerBase
 {

@@ -1,13 +1,17 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Shine.Domain;
 using Shine.Infrastructure;
 using Shine.Infrastructure.Persistence;
+using Shine.Api;
 
 namespace Shine.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/notifications")]
+[RequiresModule("CORE")]
 public sealed class NotificationsController(
     ShineDbContext dbContext,
     ICurrentUser currentUser,
