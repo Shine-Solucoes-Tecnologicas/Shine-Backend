@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Shine.Domain.Identity;
 using Shine.Infrastructure;
@@ -10,6 +11,7 @@ using Shine.Domain;
 namespace Shine.Api.Controllers;
 
 [ApiController]
+[AllowAnonymous]
 [Route("api/auth")]
 public sealed class RegistrationController(
     ShineDbContext dbContext,
@@ -34,6 +36,7 @@ public sealed class RegistrationController(
         dbContext.UserTenants.Add(new UserTenant(user.Id, tenant.Id, user.Id, isOwner: true));
         await dbContext.SaveChangesAsync(cancellationToken);
         await AuthorizationSeed.SeedTenantDefaultsAsync(dbContext, tenant.Id, user.Id, user.Id, cancellationToken);
+        await AuthorizationSeed.EnsureGlobalRolesAsync(dbContext, cancellationToken);
         dbContext.ModuleAccesses.Add(new ModuleAccess(tenant.Id, "CORE"));
         await dbContext.SaveChangesAsync(cancellationToken);
         var roles = await dbContext.UserTenantRoles.Where(link => link.UserId == user.Id && link.TenantId == tenant.Id).Select(link => link.Role.Name).Distinct().ToArrayAsync(cancellationToken);

@@ -1,4 +1,5 @@
 using Shine.Domain.Authorization;
+using Shine.Domain.Identity;
 
 namespace Shine.UnitTests;
 
@@ -56,5 +57,55 @@ public sealed class AuthorizationTests
         Assert.Equal("Owner", Role.OwnerName);
         Assert.Equal("Administrator", Role.AdministratorName);
         Assert.NotEqual(Role.OwnerName, Role.AdministratorName);
+    }
+
+    [Fact]
+    public void Global_roles_have_the_expected_system_names()
+    {
+        Assert.Equal("PlatformAdmin", GlobalRole.PlatformAdminName);
+        Assert.Equal("Support", GlobalRole.SupportName);
+        Assert.Equal("Auditor", GlobalRole.AuditorName);
+    }
+
+    [Fact]
+    public void Tenant_suspension_requires_a_reason_and_records_the_administrator()
+    {
+        var tenant = new Tenant("Acme");
+        var administratorId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        tenant.Suspend("Fraud review", administratorId, now);
+
+        Assert.False(tenant.IsActive);
+        Assert.Equal("Fraud review", tenant.SuspensionReason);
+        Assert.Equal(administratorId, tenant.SuspendedByUserId);
+        Assert.Equal(now, tenant.SuspendedAtUtc);
+        Assert.Throws<ArgumentException>(() => tenant.Suspend(" ", administratorId, now));
+    }
+
+    [Fact]
+    public void Tenant_reactivation_clears_suspension_metadata()
+    {
+        var tenant = new Tenant("Acme");
+        tenant.Suspend("Temporary", Guid.NewGuid(), DateTime.UtcNow);
+
+        tenant.Reactivate();
+
+        Assert.True(tenant.IsActive);
+        Assert.Null(tenant.SuspensionReason);
+        Assert.Null(tenant.SuspendedAtUtc);
+        Assert.Null(tenant.SuspendedByUserId);
+    }
+
+    [Fact]
+    public void User_block_and_unblock_change_account_status()
+    {
+        var user = new User("user@example.com", "hash");
+
+        user.Block();
+        Assert.False(user.IsActive);
+
+        user.Unblock();
+        Assert.True(user.IsActive);
     }
 }

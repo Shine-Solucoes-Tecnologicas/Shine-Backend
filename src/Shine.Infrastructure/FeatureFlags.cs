@@ -8,6 +8,7 @@ public interface IFeatureFlags
 {
     Task<bool> IsEnabledAsync(string key, Guid? tenantId, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<string, bool>> GetAllAsync(Guid? tenantId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<string>> GetCatalogAsync(CancellationToken cancellationToken = default);
     Task SetGlobalAsync(string key, bool enabled, CancellationToken cancellationToken = default);
     Task SetForTenantAsync(Guid tenantId, string key, bool enabled, CancellationToken cancellationToken = default);
 }
@@ -25,6 +26,9 @@ public sealed class FeatureFlags(ShineDbContext db) : IFeatureFlags
             .ToListAsync(cancellationToken);
         return flags.GroupBy(item => item.Key).ToDictionary(group => group.Key, group => group.Last().Enabled);
     }
+
+    public async Task<IReadOnlyCollection<string>> GetCatalogAsync(CancellationToken cancellationToken = default)
+        => await db.FeatureFlags.AsNoTracking().Select(item => item.Key).Distinct().OrderBy(key => key).ToArrayAsync(cancellationToken);
 
     public Task SetGlobalAsync(string key, bool enabled, CancellationToken cancellationToken = default) => SetAsync(null, key, enabled, cancellationToken);
     public Task SetForTenantAsync(Guid tenantId, string key, bool enabled, CancellationToken cancellationToken = default) => SetAsync(tenantId, key, enabled, cancellationToken);

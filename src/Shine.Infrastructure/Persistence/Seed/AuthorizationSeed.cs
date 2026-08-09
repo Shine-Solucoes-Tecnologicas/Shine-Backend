@@ -13,8 +13,43 @@ public static class AuthorizationSeed
         ["users.manage"] = "Gerenciar usuários da empresa",
         ["roles.read"] = "Visualizar roles e permissões",
         ["roles.manage"] = "Gerenciar roles e permissões",
-        ["modules.manage"] = "Gerenciar acesso aos módulos"
+        ["modules.manage"] = "Gerenciar acesso aos módulos",
+        ["admin.read"] = "Consultar a plataforma administrativamente",
+        ["admin.manage"] = "Gerenciar a plataforma administrativamente",
+        ["admin.audit"] = "Consultar auditoria administrativa"
     };
+
+    public static async Task EnsureGlobalRolesAsync(ShineDbContext db, CancellationToken cancellationToken = default)
+    {
+        var permissions = await EnsureInitialPermissionsAsync(db, cancellationToken);
+        var permissionByCode = permissions.ToDictionary(item => item.Code, StringComparer.Ordinal);
+        var roleNames = new[] { GlobalRole.PlatformAdminName, GlobalRole.SupportName, GlobalRole.AuditorName };
+        var roles = await db.GlobalRoles.Where(item => roleNames.Contains(item.Name)).ToDictionaryAsync(item => item.Name, StringComparer.Ordinal, cancellationToken);
+        foreach (var name in roleNames)
+        {
+            if (roles.ContainsKey(name)) continue;
+            var role = new GlobalRole(name);
+            db.GlobalRoles.Add(role);
+            roles[name] = role;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+
+        var assignments = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            [GlobalRole.PlatformAdminName] = ["admin.read", "admin.manage", "admin.audit"],
+            [GlobalRole.SupportName] = ["admin.read", "admin.manage"],
+            [GlobalRole.AuditorName] = ["admin.read", "admin.audit"]
+        };
+        foreach (var (roleName, codes) in assignments)
+        foreach (var code in codes)
+        {
+            var role = roles[roleName];
+            var permission = permissionByCode[code];
+            if (!await db.GlobalRolePermissions.AnyAsync(item => item.RoleId == role.Id && item.PermissionId == permission.Id, cancellationToken))
+                db.GlobalRolePermissions.Add(new GlobalRolePermission(role.Id, permission.Id));
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
 
     public static async Task<IReadOnlyCollection<Permission>> EnsureInitialPermissionsAsync(ShineDbContext db, CancellationToken cancellationToken = default)
     {
@@ -40,6 +75,7 @@ public static class AuthorizationSeed
         var permissions = await EnsureInitialPermissionsAsync(db, cancellationToken);
         var owner = await EnsureOwnerRoleAsync(db, tenantId, ownerUserId, cancellationToken);
         var administrator = await EnsureAdministratorRoleAsync(db, tenantId, administratorUserId, cancellationToken);
+        await EnsureMemberRoleAsync(db, tenantId, cancellationToken);
         var permissionIds = permissions.Select(item => item.Id).ToHashSet();
 
         var existingLinks = await db.RolePermissions
@@ -53,6 +89,18 @@ public static class AuthorizationSeed
                 db.RolePermissions.Add(new RolePermission(role.Id, permission.Id));
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public static async Task<Role> EnsureMemberRoleAsync(ShineDbContext db, Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var role = await db.Roles.SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Name == Role.MemberName, cancellationToken);
+        if (role is null)
+        {
+            role = new Role(tenantId, Role.MemberName, isSystem: true);
+            db.Roles.Add(role);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        return role;
     }
 
     public static async Task<Role> EnsureOwnerRoleAsync(ShineDbContext db, Guid tenantId, Guid ownerUserId, CancellationToken cancellationToken = default)

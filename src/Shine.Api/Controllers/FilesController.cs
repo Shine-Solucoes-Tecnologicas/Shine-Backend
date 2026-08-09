@@ -1,10 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Shine.Infrastructure;
+using Shine.Api;
 
 namespace Shine.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/files")]
+[RequiresModule("CORE")]
 public sealed class FilesController(IFileStorage storage) : ControllerBase
 {
     [HttpPost]

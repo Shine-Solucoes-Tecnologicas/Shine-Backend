@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Shine.Domain.Identity;
 using Shine.Infrastructure;
@@ -7,11 +8,13 @@ using Shine.Infrastructure.Persistence;
 namespace Shine.Api.Controllers;
 
 [ApiController]
+[AllowAnonymous]
 [Route("api/auth/password")]
 public sealed class PasswordRecoveryController(
     ShineDbContext dbContext,
     IPasswordHashService passwordHashService,
-    IPasswordPolicy passwordPolicy) : ControllerBase
+    IPasswordPolicy passwordPolicy,
+    IPasswordRecoveryMessageTemplate messageTemplate) : ControllerBase
 {
     [HttpPost("recovery")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
@@ -28,8 +31,10 @@ public sealed class PasswordRecoveryController(
             foreach (var token in previous) token.MarkUsed(now);
 
             var (rawToken, tokenHash) = PasswordResetTokenService.Create();
-            dbContext.PasswordResetTokens.Add(new PasswordResetToken(user.Id, tokenHash, now.AddMinutes(30)));
+            var expiresAt = now.AddMinutes(30);
+            dbContext.PasswordResetTokens.Add(new PasswordResetToken(user.Id, tokenHash, expiresAt));
             await dbContext.SaveChangesAsync(cancellationToken);
+            _ = messageTemplate.Create(user.Email, rawToken, expiresAt);
             _ = rawToken; // Entrega será realizada pelo serviço de e-mail do DEV-47.
         }
 

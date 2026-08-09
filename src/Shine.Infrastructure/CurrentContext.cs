@@ -30,7 +30,11 @@ public sealed class CurrentTenant(IHttpContextAccessor accessor) : ICurrentTenan
 {
     public Guid? TenantId => ReadGuid("tenant_id");
     public Guid? UserTenantId => ReadGuid("user_tenant_id");
-    public IReadOnlyCollection<string> Roles => accessor.HttpContext?.User.FindAll("role").Select(claim => claim.Value).ToArray() ?? [];
+    public IReadOnlyCollection<string> Roles => accessor.HttpContext?.User
+        .FindAll(ClaimTypes.Role)
+        .Select(claim => claim.Value)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray() ?? [];
     public bool HasCompleteContext => TenantId is not null && UserTenantId is not null;
 
     private Guid? ReadGuid(string claimType) =>

@@ -16,5 +16,25 @@ public sealed class Tenant
     public string Name { get; private set; } = null!;
     public bool IsActive { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
+    public string? SuspensionReason { get; private set; }
+    public DateTime? SuspendedAtUtc { get; private set; }
+    public Guid? SuspendedByUserId { get; private set; }
     public ICollection<UserTenant> Users { get; private set; } = new List<UserTenant>();
+
+    public void Suspend(string reason, Guid administratorUserId, DateTime nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("A suspension reason is required.", nameof(reason));
+        IsActive = false;
+        SuspensionReason = reason.Trim();
+        SuspendedAtUtc = nowUtc;
+        SuspendedByUserId = administratorUserId;
+    }
+
+    public void Reactivate()
+    {
+        IsActive = true;
+        SuspensionReason = null;
+        SuspendedAtUtc = null;
+        SuspendedByUserId = null;
+    }
 }
