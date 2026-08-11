@@ -10,6 +10,28 @@ namespace Shine.Api.Controllers;
 [RequiresGlobalPermission("admin.audit")]
 public sealed class AdministrativeAuditController(ShineDbContext db) : ControllerBase
 {
+    [HttpGet("{auditId:guid}")]
+    public async Task<ActionResult<AdministrativeAuditResponse>> Detail(Guid auditId, CancellationToken cancellationToken)
+    {
+        var entry = await db.AuditEntries
+            .AsNoTracking()
+            .Where(item => item.Id == auditId)
+            .Select(item => new AdministrativeAuditResponse(
+                item.Id,
+                item.EntityType,
+                item.EntityId,
+                item.Action,
+                item.UserId,
+                item.TenantId,
+                item.OccurredAtUtc,
+                item.CorrelationId,
+                item.OldValuesJson,
+                item.NewValuesJson))
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return entry is null ? NotFound() : Ok(entry);
+    }
+
     [HttpGet]
     public async Task<ActionResult<PagedResponse<AdministrativeAuditResponse>>> List(
         [FromQuery] PagedRequest request,

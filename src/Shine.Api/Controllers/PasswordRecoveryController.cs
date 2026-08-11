@@ -14,7 +14,9 @@ public sealed class PasswordRecoveryController(
     ShineDbContext dbContext,
     IPasswordHashService passwordHashService,
     IPasswordPolicy passwordPolicy,
-    IPasswordRecoveryMessageTemplate messageTemplate) : ControllerBase
+    IPasswordRecoveryMessageTemplate messageTemplate,
+    IConfiguration configuration,
+    ILogger<PasswordRecoveryController> logger) : ControllerBase
 {
     [HttpPost("recovery")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
@@ -34,7 +36,9 @@ public sealed class PasswordRecoveryController(
             var expiresAt = now.AddMinutes(30);
             dbContext.PasswordResetTokens.Add(new PasswordResetToken(user.Id, tokenHash, expiresAt));
             await dbContext.SaveChangesAsync(cancellationToken);
-            _ = messageTemplate.Create(user.Email, rawToken, expiresAt);
+            var message = messageTemplate.Create(user.Email, rawToken, expiresAt);
+            if (configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
+                logger.LogInformation("Mock password recovery delivery for {Email}: {Message}", user.Email, message.TextBody);
             _ = rawToken; // Entrega será realizada pelo serviço de e-mail do DEV-47.
         }
 

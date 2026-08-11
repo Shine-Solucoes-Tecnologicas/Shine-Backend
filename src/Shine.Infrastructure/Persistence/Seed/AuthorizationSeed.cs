@@ -14,6 +14,8 @@ public static class AuthorizationSeed
         ["roles.read"] = "Visualizar roles e permissões",
         ["roles.manage"] = "Gerenciar roles e permissões",
         ["modules.manage"] = "Gerenciar acesso aos módulos",
+        ["scheduling.read"] = "Visualizar agenda e disponibilidade",
+        ["scheduling.manage"] = "Gerenciar agenda, disponibilidade e agendamentos",
         ["admin.read"] = "Consultar a plataforma administrativamente",
         ["admin.manage"] = "Gerenciar a plataforma administrativamente",
         ["admin.audit"] = "Consultar auditoria administrativa"

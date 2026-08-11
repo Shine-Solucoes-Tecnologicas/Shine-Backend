@@ -6,6 +6,11 @@ public interface IEntity<out TId>
 }
 
 public interface IDomainEvent { }
+public interface IIntegrationEvent
+{
+    Guid TenantId { get; }
+    DateTime OccurredAtUtc { get; }
+}
 
 public interface IHasDomainEvents
 {

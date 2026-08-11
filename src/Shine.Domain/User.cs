@@ -22,13 +22,29 @@ public sealed class User
     public int FailedLoginAttempts { get; private set; }
     public DateTime? LockedUntilUtc { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
+    public string? BlockReason { get; private set; }
+    public DateTime? BlockedAtUtc { get; private set; }
+    public Guid? BlockedByUserId { get; private set; }
     public ICollection<UserTenant> Tenants { get; private set; } = new List<UserTenant>();
 
     public static string NormalizeEmail(string email) => email.Trim().ToUpperInvariant();
 
     public void ChangePassword(string passwordHash) => PasswordHash = passwordHash;
-    public void Block() => IsActive = false;
-    public void Unblock() => IsActive = true;
+    public void Block(string reason, Guid administratorUserId, DateTime nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("A block reason is required.", nameof(reason));
+        IsActive = false;
+        BlockReason = reason.Trim();
+        BlockedAtUtc = nowUtc;
+        BlockedByUserId = administratorUserId;
+    }
+    public void Unblock()
+    {
+        IsActive = true;
+        BlockReason = null;
+        BlockedAtUtc = null;
+        BlockedByUserId = null;
+    }
     public bool IsLoginLocked(DateTime nowUtc) => LockedUntilUtc is DateTime lockedUntil && lockedUntil > nowUtc;
     public void RegisterFailedLogin(DateTime nowUtc, int maxAttempts, TimeSpan lockout)
     {

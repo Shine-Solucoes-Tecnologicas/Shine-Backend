@@ -9,6 +9,18 @@ services:
       - "5433:5432"
     volumes:
       - shine-postgres-data:/var/lib/postgresql/data
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: shine
+      RABBITMQ_DEFAULT_PASS: shine
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - shine-rabbitmq-data:/var/lib/rabbitmq
 
 volumes:
   shine-postgres-data:
+  shine-rabbitmq-data:

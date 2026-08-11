@@ -22,5 +22,7 @@
     <ProjectReference Include="..\..\src\Shine.Api\Shine.Api.csproj" />
     <ProjectReference Include="..\..\src\Shine.Application\Shine.Application.csproj" />
     <ProjectReference Include="..\..\src\Shine.Infrastructure\Shine.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Scheduling.Domain\Scheduling.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Scheduling.Application\Scheduling.Application.csproj" />
   </ItemGroup>
 </Project>
