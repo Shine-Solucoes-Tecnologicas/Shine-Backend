@@ -21,7 +21,10 @@ public sealed class DatabaseFixture : IAsyncLifetime
     }
 
     public async Task DisposeAsync() => await Db.DisposeAsync();
-    public ShineDbContext CreateDb() => new(new DbContextOptionsBuilder<ShineDbContext>().UseNpgsql(connectionString).Options, currentTenant: new UnscopedTenant());
+    public ShineDbContext CreateDb(ICurrentTenant? currentTenant = null, ITenantExecutionContext? tenantExecutionContext = null) =>
+        new(new DbContextOptionsBuilder<ShineDbContext>().UseNpgsql(connectionString).Options,
+            currentTenant: currentTenant ?? new UnscopedTenant(),
+            tenantExecutionContext: tenantExecutionContext);
 }
 
 file sealed class UnscopedTenant : ICurrentTenant

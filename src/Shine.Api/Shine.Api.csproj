@@ -19,6 +19,8 @@
     <ProjectReference Include="..\Shine.Application\Shine.Application.csproj" />
     <ProjectReference Include="..\Shine.Infrastructure\Shine.Infrastructure.csproj" />
     <ProjectReference Include="..\Shine.Shared\Shine.Shared.csproj" />
+    <ProjectReference Include="..\Scheduling.Infrastructure\Scheduling.Infrastructure.csproj" />
+    <ProjectReference Include="..\Scheduling.Application\Scheduling.Application.csproj" />
   </ItemGroup>
 
 </Project>

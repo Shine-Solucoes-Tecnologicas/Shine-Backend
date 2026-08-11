@@ -22,6 +22,7 @@ public sealed class ShineDbContext(
     public DbSet<UserTenant> UserTenants => Set<UserTenant>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<OperationalLog> OperationalLogs => Set<OperationalLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<FunctionalSetting> FunctionalSettings => Set<FunctionalSetting>();
     public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
@@ -287,6 +288,19 @@ public sealed class ShineDbContext(
             entity.Property(entry => entry.NewValuesJson).HasColumnType("jsonb");
             entity.HasIndex(entry => new { entry.TenantId, entry.EntityType, entry.EntityId });
             entity.HasIndex(entry => entry.OccurredAtUtc);
+        });
+
+        modelBuilder.Entity<OperationalLog>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Level).HasMaxLength(32).IsRequired();
+            entity.Property(item => item.Category).HasMaxLength(256).IsRequired();
+            entity.Property(item => item.Message).HasMaxLength(4000).IsRequired();
+            entity.Property(item => item.Exception).HasMaxLength(12000);
+            entity.Property(item => item.CorrelationId).HasMaxLength(100);
+            entity.Property(item => item.TraceId).HasMaxLength(100);
+            entity.HasIndex(item => item.CreatedAtUtc);
+            entity.HasIndex(item => new { item.Level, item.Category });
         });
 
         modelBuilder.Entity<Notification>(entity =>

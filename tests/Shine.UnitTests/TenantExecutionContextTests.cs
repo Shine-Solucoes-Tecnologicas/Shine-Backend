@@ -30,6 +30,23 @@ public sealed class TenantExecutionContextTests
         Assert.False(context.IsBypass);
     }
 
+    [Fact]
+    public void Nested_bypass_restores_each_previous_state()
+    {
+        var context = new TenantExecutionContext(new FakeTenantContext(Guid.NewGuid(), ["admin"]));
+
+        using (context.EnterBypass())
+        {
+            Assert.True(context.IsBypass);
+            using (context.EnterBypass())
+                Assert.True(context.IsBypass);
+
+            Assert.True(context.IsBypass);
+        }
+
+        Assert.False(context.IsBypass);
+    }
+
     private sealed class FakeTenantContext(Guid? tenantId, IReadOnlyCollection<string> roles) : ICurrentTenant
     {
         public Guid? TenantId => tenantId;

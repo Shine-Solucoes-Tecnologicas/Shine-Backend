@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Shine.Application;
 using Shine.Infrastructure;
 using Shine.Api;
+using Scheduling.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,9 +11,19 @@ builder.Logging.AddJsonConsole();
 var connectionString = builder.Configuration.GetSection("ConnectionStrings").Get<ConnectionStringOptions>()?.ShineDb
     ?? throw new InvalidOperationException("Connection string 'ShineDb' was not configured.");
 builder.Services.AddInfrastructure(connectionString);
+builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("RabbitMq"));
+builder.Services.AddScheduling(connectionString);
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<Shine.Infrastructure.Persistence.ShineDbContext>("postgresql");
+    .AddDbContextCheck<Shine.Infrastructure.Persistence.ShineDbContext>("postgresql")
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq");
 builder.Services.AddControllers();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddAuthentication("ShineJwt")
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ShineAuthenticationHandler>("ShineJwt", _ => { });
+builder.Services.AddCors(options => options.AddPolicy("FrontendDevelopment", policy => policy
+    .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
 builder.Services.AddSingleton<IPasswordRecoveryMessageTemplate, PasswordRecoveryMessageTemplate>();
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
@@ -32,6 +43,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseCors("FrontendDevelopment");
 app.UseMiddleware<RequestDiagnosticsMiddleware>();
 app.UseMiddleware<JwtAuthenticationMiddleware>();
 app.UseAuthorization();

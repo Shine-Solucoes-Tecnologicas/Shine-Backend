@@ -10,6 +10,8 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, string connectionString)
     {
+        services.AddOptions<RabbitMqOptions>();
+        services.AddSingleton<IMessageBus, RabbitMqMessageBus>();
         services.AddMemoryCache();
         services.AddSingleton<ICacheService, MemoryCacheService>();
         services.AddSingleton<IPasswordHashService, Pbkdf2PasswordHashService>();
@@ -32,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<ICurrentTenant, CurrentTenant>();
         services.AddScoped<ITenantExecutionContext, TenantExecutionContext>();
+        services.AddScoped<IOperationalLogWriter, OperationalLogWriter>();
         services.AddScoped<IPermissionAuthorization, PermissionAuthorization>();
         services.AddOptions<FileStorageOptions>().BindConfiguration("FileStorage");
         services.AddSingleton<IFileStorage, LocalFileStorage>();

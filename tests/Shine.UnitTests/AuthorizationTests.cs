@@ -102,7 +102,7 @@ public sealed class AuthorizationTests
     {
         var user = new User("user@example.com", "hash");
 
-        user.Block();
+        user.Block("Test block", Guid.NewGuid(), DateTime.UtcNow);
         Assert.False(user.IsActive);
 
         user.Unblock();

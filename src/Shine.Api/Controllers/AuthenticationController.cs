@@ -121,6 +121,12 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
         user.RegisterSuccessfulLogin();
 
         var accessibleLinks = user.Tenants.Where(link => link.IsActive && link.Tenant.IsActive).ToArray();
+        if (accessibleLinks.Length == 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Unauthorized();
+        }
+
         var tenants = accessibleLinks
             .Select(link => new AccessibleTenantResponse(link.Tenant.Id, link.Tenant.Name)).ToArray();
         Guid? tenantId = null;
@@ -150,6 +156,9 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
     {
         var current = await dbContext.RefreshTokens.Include(item => item.User).SingleOrDefaultAsync(item => item.TokenHash == RefreshTokenHash.Hash(request.RefreshToken), cancellationToken);
         if (current is null || !current.IsActive(DateTime.UtcNow) || !current.User.IsActive) return Unauthorized();
+        if (current.TenantId is Guid refreshTenantId && !await dbContext.Tenants.AnyAsync(tenant => tenant.Id == refreshTenantId && tenant.IsActive, cancellationToken))
+            return Unauthorized();
+
         var replacement = RefreshTokenHash.Create();
         current.Revoke(DateTime.UtcNow, replacement.Hash);
         var next = new RefreshToken(current.UserId, current.TenantId, current.UserTenantId, replacement.Hash, DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays));
@@ -160,6 +169,28 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
         var access = accessTokenService.Create(current.UserId, current.TenantId, current.UserTenantId, roles);
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(new RefreshResponse(access.Token, access.ExpiresAtUtc, replacement.Raw));
+    }
+
+    [Authorize]
+    [HttpPost("select-tenant")]
+    public async Task<ActionResult<RefreshResponse>> SelectTenant(SelectTenantRequest request, CancellationToken cancellationToken)
+    {
+        var userId = RequireUserId();
+        var membership = await dbContext.UserTenants
+            .Include(item => item.Tenant)
+            .SingleOrDefaultAsync(item => item.UserId == userId && item.TenantId == request.TenantId && item.IsActive && item.Tenant.IsActive, cancellationToken);
+        if (membership is null) return Forbid();
+
+        var roles = await dbContext.UserTenantRoles
+            .Where(item => item.UserId == userId && item.TenantId == request.TenantId)
+            .Select(item => item.Role.Name)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        var access = accessTokenService.Create(userId, request.TenantId, membership.UserTenantId, roles);
+        var refresh = RefreshTokenHash.Create();
+        dbContext.RefreshTokens.Add(new RefreshToken(userId, request.TenantId, membership.UserTenantId, refresh.Hash, DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays)));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(new RefreshResponse(access.Token, access.ExpiresAtUtc, refresh.Raw));
     }
 
     [Authorize]
@@ -186,5 +217,6 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
 
 public sealed record RefreshRequest(string RefreshToken);
 public sealed record RefreshResponse(string AccessToken, DateTime AccessTokenExpiresAtUtc, string RefreshToken);
+public sealed record SelectTenantRequest(Guid TenantId);
 public sealed record SessionResponse(Guid Id, Guid? TenantId, Guid? UserTenantId, DateTime CreatedAtUtc, DateTime ExpiresAtUtc, DateTime? RevokedAtUtc, bool IsActive);
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
