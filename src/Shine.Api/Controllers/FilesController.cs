@@ -41,7 +41,7 @@ public sealed class FilesController(IFileStorage storage) : ControllerBase
         try
         {
             var content = await storage.OpenReadAsync(id, cancellationToken);
-            return content is null ? NotFound() : File(content, GetContentType(id), enableRangeProcessing: true);
+            return content is null ? NotFound() : File(content, "application/octet-stream", enableRangeProcessing: true);
         }
         catch (ArgumentException)
         {
@@ -62,7 +62,6 @@ public sealed class FilesController(IFileStorage storage) : ControllerBase
         }
     }
 
-    private static string GetContentType(string id) => "application/octet-stream";
 }
 
 public sealed record FileUploadResponse(string Id, string OriginalFileName, string ContentType, long Length);
