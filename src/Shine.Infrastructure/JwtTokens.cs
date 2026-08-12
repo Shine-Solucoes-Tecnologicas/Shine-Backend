@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Shine.Shared;
 
 namespace Shine.Infrastructure;
 
@@ -29,7 +30,7 @@ public sealed class HmacAccessTokenService(IOptions<JwtOptions> options) : IAcce
     {
         if (string.IsNullOrWhiteSpace(settings.Secret)) throw new InvalidOperationException("Jwt:Secret must be configured.");
         var expires = DateTime.UtcNow.AddMinutes(settings.AccessTokenMinutes);
-        var header = Base64Url(JsonSerializer.SerializeToUtf8Bytes(new { alg = "HS256", typ = "JWT" }));
+        var header = Base64UrlEncoding.Encode(JsonSerializer.SerializeToUtf8Bytes(new { alg = "HS256", typ = "JWT" }));
         var payload = new Dictionary<string, object>
         {
             ["sub"] = userId,
@@ -42,14 +43,13 @@ public sealed class HmacAccessTokenService(IOptions<JwtOptions> options) : IAcce
         };
         if (tenantId is not null) payload["tenant_id"] = tenantId;
         if (userTenantId is not null) payload["user_tenant_id"] = userTenantId;
-        var body = Base64Url(JsonSerializer.SerializeToUtf8Bytes(payload));
+        var body = Base64UrlEncoding.Encode(JsonSerializer.SerializeToUtf8Bytes(payload));
         var unsigned = $"{header}.{body}";
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(settings.Secret));
-        var signature = Base64Url(hmac.ComputeHash(Encoding.UTF8.GetBytes(unsigned)));
+        var signature = Base64UrlEncoding.Encode(hmac.ComputeHash(Encoding.UTF8.GetBytes(unsigned)));
         return new AccessTokenResult($"{unsigned}.{signature}", expires);
     }
 
-    private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
 
 public static class RefreshTokenHash
