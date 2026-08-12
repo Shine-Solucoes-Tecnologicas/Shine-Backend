@@ -13,7 +13,7 @@ namespace Shine.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/scheduling")]
-public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher) : ControllerBase
+public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter) : ControllerBase
 {
     [HttpGet("professionals")]
     public async Task<ActionResult<PagedResponse<ProfessionalResponse>>> Professionals([FromQuery] PagedRequest request, CancellationToken cancellationToken)
@@ -27,7 +27,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     [RequiresPermission("scheduling.manage")]
     public async Task<ActionResult<ProfessionalResponse>> CreateProfessional(CreateProfessionalRequest request, CancellationToken cancellationToken)
     {
-        var item = new Professional(RequireTenant(), request.Name, request.UserId, request.MaxConcurrentAppointments); db.Professionals.Add(item); await db.SaveChangesAsync(cancellationToken); return Ok(new ProfessionalResponse(item.Id, item.Name, item.UserId, item.IsActive, item.MaxConcurrentAppointments));
+        var tenantId = RequireTenant();
+        var settings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        Professional item;
+        try { item = new Professional(tenantId, request.Name, request.UserId, request.MaxConcurrentAppointments ?? settings?.DefaultMaxConcurrentAppointments ?? 1); }
+        catch (ArgumentException exception) { return BadRequest(new { code = "INVALID_PROFESSIONAL", message = exception.Message }); }
+        db.Professionals.Add(item); await db.SaveChangesAsync(cancellationToken); return Ok(new ProfessionalResponse(item.Id, item.Name, item.UserId, item.IsActive, item.MaxConcurrentAppointments));
     }
 
     [HttpPut("professionals/{professionalId:guid}/capacity")]
@@ -36,7 +41,8 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     {
         var item = await db.Professionals.SingleOrDefaultAsync(x => x.Id == professionalId && x.TenantId == RequireTenant(), cancellationToken);
         if (item is null) return NotFound();
-        item.SetMaxConcurrentAppointments(request.MaxConcurrentAppointments);
+        try { item.SetMaxConcurrentAppointments(request.MaxConcurrentAppointments); }
+        catch (ArgumentOutOfRangeException exception) { return BadRequest(new { code = "INVALID_CAPACITY", message = exception.Message }); }
         await db.SaveChangesAsync(cancellationToken);
         return Ok(new ProfessionalResponse(item.Id, item.Name, item.UserId, item.IsActive, item.MaxConcurrentAppointments));
     }
@@ -176,7 +182,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         var tenantId = RequireTenant();
         var item = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
         item ??= new SchedulingSettings(tenantId);
-        return Ok(new SchedulingSettingsResponse(item.SlotIntervalMinutes, item.BufferBeforeMinutes, item.BufferAfterMinutes, item.TimeZoneId));
+        return Ok(new SchedulingSettingsResponse(item.SlotIntervalMinutes, item.BufferBeforeMinutes, item.BufferAfterMinutes, item.TimeZoneId, item.ConflictMode, item.DefaultMaxConcurrentAppointments));
     }
 
     [HttpPut("settings")]
@@ -186,9 +192,11 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         var tenantId = RequireTenant();
         var item = await db.SchedulingSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
         if (item is null) { item = new SchedulingSettings(tenantId); db.SchedulingSettings.Add(item); }
-        item.Update(request.SlotIntervalMinutes, request.BufferBeforeMinutes, request.BufferAfterMinutes, request.TimeZoneId);
+        try { item.Update(request.SlotIntervalMinutes, request.BufferBeforeMinutes, request.BufferAfterMinutes, request.TimeZoneId, request.ConflictMode, request.DefaultMaxConcurrentAppointments); }
+        catch (ArgumentException exception) { return BadRequest(new { code = "INVALID_SCHEDULING_SETTINGS", message = exception.Message }); }
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(new SchedulingSettingsResponse(item.SlotIntervalMinutes, item.BufferBeforeMinutes, item.BufferAfterMinutes, item.TimeZoneId));
+        await operationalLogWriter.WriteAsync("Information", "Scheduling.Settings", $"Scheduling settings updated: conflictMode={item.ConflictMode}; slotIntervalMinutes={item.SlotIntervalMinutes}; defaultCapacity={item.DefaultMaxConcurrentAppointments}.", cancellationToken: cancellationToken);
+        return Ok(new SchedulingSettingsResponse(item.SlotIntervalMinutes, item.BufferBeforeMinutes, item.BufferAfterMinutes, item.TimeZoneId, item.ConflictMode, item.DefaultMaxConcurrentAppointments));
     }
 
     [HttpGet("availability/slots")]
@@ -231,15 +239,17 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         var validAssociation = await db.ProfessionalServices.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.ServiceId == request.ServiceId && x.IsActive, cancellationToken);
         if (!validAssociation) return BadRequest("Professional is not associated with the service.");
         var service = await db.Services.AsNoTracking().SingleAsync(x => x.Id == request.ServiceId, cancellationToken);
+        var tenantSettings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
         var expectedEnd = request.StartsAtUtc.AddMinutes(service.DurationMinutes);
         if (expectedEnd != request.EndsAtUtc) return BadRequest("Appointment end must match the service duration.");
         var professional = await db.Professionals.SingleAsync(x => x.Id == request.ProfessionalId && x.TenantId == tenantId, cancellationToken);
-        var conflictCount = await db.Appointments.CountAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.Status != AppointmentStatus.Cancelled && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
+        var conflicts = await db.Appointments.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.Status != AppointmentStatus.Cancelled && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc).Select(x => new ConflictAppointmentResponse(x.Id, x.CustomerName, x.StartsAtUtc, x.EndsAtUtc)).ToArrayAsync(cancellationToken);
+        var conflictCount = conflicts.Length;
         var blocked = await db.ScheduleBlocks.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
         if (blocked) return Conflict("Appointment conflicts with a schedule block.");
-        var policy = new CapacityPolicy(professional.MaxConcurrentAppointments, request.ConflictMode);
-        if (policy.Blocks(conflictCount)) return Conflict(new { code = "CAPACITY_EXCEEDED", message = "Professional capacity is exceeded for this period.", current = conflictCount, capacity = policy.MaxConcurrent });
-        if (policy.RequiresConfirmation(conflictCount) && !request.AllowConflict) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "Appointment overlaps an existing appointment.", current = conflictCount, capacity = policy.MaxConcurrent });
+        var policy = new CapacityPolicy(professional.MaxConcurrentAppointments, request.ConflictMode ?? tenantSettings?.ConflictMode ?? ConflictMode.WarnAndConfirm);
+        if (policy.Blocks(conflictCount)) return Conflict(new { code = "CAPACITY_EXCEEDED", message = "Professional capacity is exceeded for this period.", current = conflictCount, capacity = policy.MaxConcurrent, conflicts });
+        if (policy.RequiresConfirmation(conflictCount) && !request.AllowConflict) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "Appointment overlaps an existing appointment.", current = conflictCount, capacity = policy.MaxConcurrent, conflicts });
         var item = new Appointment(tenantId, request.ProfessionalId, request.ServiceId, request.CustomerName, request.CustomerContact, request.StartsAtUtc, request.EndsAtUtc);
         db.Appointments.Add(item);
         await eventPublisher.PublishAsync(new AppointmentCreatedEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, item.StartsAtUtc, item.EndsAtUtc, DateTime.UtcNow), cancellationToken);
@@ -267,23 +277,26 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         if (item is null) return NotFound();
         if (request.ExpectedVersion != item.Version) return Conflict(new { code = "STALE_APPOINTMENT", message = "Appointment was changed by another user.", currentVersion = item.Version });
         var professional = await db.Professionals.SingleAsync(x => x.Id == item.ProfessionalId && x.TenantId == tenantId, cancellationToken);
-        var conflictCount = await db.Appointments.CountAsync(x => x.Id != appointmentId && x.TenantId == tenantId && x.ProfessionalId == item.ProfessionalId && x.Status != AppointmentStatus.Cancelled && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
+        var tenantSettings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        var conflicts = await db.Appointments.AsNoTracking().Where(x => x.Id != appointmentId && x.TenantId == tenantId && x.ProfessionalId == item.ProfessionalId && x.Status != AppointmentStatus.Cancelled && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc).Select(x => new ConflictAppointmentResponse(x.Id, x.CustomerName, x.StartsAtUtc, x.EndsAtUtc)).ToArrayAsync(cancellationToken);
+        var conflictCount = conflicts.Length;
         var blocked = await db.ScheduleBlocks.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == item.ProfessionalId && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
         if (blocked) return Conflict("Appointment conflicts with a schedule block.");
-        var policy = new CapacityPolicy(professional.MaxConcurrentAppointments, request.ConflictMode);
-        if (policy.Blocks(conflictCount)) return Conflict(new { code = "CAPACITY_EXCEEDED", message = "Professional capacity is exceeded for this period.", current = conflictCount, capacity = policy.MaxConcurrent });
-        if (policy.RequiresConfirmation(conflictCount) && !request.AllowConflict) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "Appointment overlaps an existing appointment.", current = conflictCount, capacity = policy.MaxConcurrent });
+        var policy = new CapacityPolicy(professional.MaxConcurrentAppointments, request.ConflictMode ?? tenantSettings?.ConflictMode ?? ConflictMode.WarnAndConfirm);
+        if (policy.Blocks(conflictCount)) return Conflict(new { code = "CAPACITY_EXCEEDED", message = "Professional capacity is exceeded for this period.", current = conflictCount, capacity = policy.MaxConcurrent, conflicts });
+        if (policy.RequiresConfirmation(conflictCount) && !request.AllowConflict) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "Appointment overlaps an existing appointment.", current = conflictCount, capacity = policy.MaxConcurrent, conflicts });
         var previousStartsAtUtc = item.StartsAtUtc; var previousEndsAtUtc = item.EndsAtUtc;
         item.Reschedule(request.StartsAtUtc, request.EndsAtUtc);
         await eventPublisher.PublishAsync(new AppointmentRescheduledEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, previousStartsAtUtc, previousEndsAtUtc, item.StartsAtUtc, item.EndsAtUtc, DateTime.UtcNow), cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+        try { await db.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { code = "STALE_APPOINTMENT", message = "Appointment was changed by another user." }); }
         return Ok(new AppointmentResponse(item.Id, item.ProfessionalId, item.ServiceId, item.CustomerName, item.CustomerContact, item.StartsAtUtc, item.EndsAtUtc, item.Status, item.Version));
     }
 
     private Guid RequireTenant() => currentTenant.TenantId ?? throw new TenantIsolationException("An active tenant is required.");
 }
 
-public sealed record CreateProfessionalRequest(string Name, Guid? UserId, int MaxConcurrentAppointments = 1);
+public sealed record CreateProfessionalRequest(string Name, Guid? UserId, int? MaxConcurrentAppointments = null);
 public sealed record UpdateProfessionalCapacityRequest(int MaxConcurrentAppointments);
 public sealed record ProfessionalResponse(Guid Id, string Name, Guid? UserId, bool IsActive, int MaxConcurrentAppointments);
 public sealed record CreateServiceRequest(string Name, int DurationMinutes);
@@ -296,10 +309,11 @@ public sealed record ScheduleBlockRequest(DateTime StartsAtUtc, DateTime EndsAtU
 public sealed record ScheduleBlockResponse(Guid Id, DateTime StartsAtUtc, DateTime EndsAtUtc, string Reason);
 public sealed record AvailabilityExceptionRequest(DateOnly Date, TimeSpan? StartsAt, TimeSpan? EndsAt, string Reason);
 public sealed record AvailabilityExceptionResponse(Guid Id, DateOnly Date, TimeSpan? StartsAt, TimeSpan? EndsAt, string Reason);
-public sealed record SchedulingSettingsRequest(int SlotIntervalMinutes, int BufferBeforeMinutes, int BufferAfterMinutes, string TimeZoneId);
-public sealed record SchedulingSettingsResponse(int SlotIntervalMinutes, int BufferBeforeMinutes, int BufferAfterMinutes, string TimeZoneId);
+public sealed record SchedulingSettingsRequest(int SlotIntervalMinutes, int BufferBeforeMinutes, int BufferAfterMinutes, string TimeZoneId, ConflictMode ConflictMode = ConflictMode.WarnAndConfirm, int DefaultMaxConcurrentAppointments = 1);
+public sealed record SchedulingSettingsResponse(int SlotIntervalMinutes, int BufferBeforeMinutes, int BufferAfterMinutes, string TimeZoneId, ConflictMode ConflictMode, int DefaultMaxConcurrentAppointments);
 public sealed record AvailabilitySlotResponse(DateTime StartsAtUtc, DateTime EndsAtUtc);
-public sealed record CreateAppointmentRequest(Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, bool AllowConflict = false, ConflictMode ConflictMode = ConflictMode.WarnAndConfirm);
+public sealed record CreateAppointmentRequest(Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, bool AllowConflict = false, ConflictMode? ConflictMode = null);
 public sealed record ChangeAppointmentStatusRequest(AppointmentStatus Status);
 public sealed record AppointmentResponse(Guid Id, Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, AppointmentStatus Status, Guid Version);
-public sealed record RescheduleAppointmentRequest(DateTime StartsAtUtc, DateTime EndsAtUtc, Guid ExpectedVersion, bool AllowConflict = false, ConflictMode ConflictMode = ConflictMode.WarnAndConfirm);
+public sealed record ConflictAppointmentResponse(Guid Id, string CustomerName, DateTime StartsAtUtc, DateTime EndsAtUtc);
+public sealed record RescheduleAppointmentRequest(DateTime StartsAtUtc, DateTime EndsAtUtc, Guid ExpectedVersion, bool AllowConflict = false, ConflictMode? ConflictMode = null);

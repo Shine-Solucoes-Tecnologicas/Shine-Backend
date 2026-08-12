@@ -9,7 +9,7 @@ public enum ConflictMode
 
 public sealed class CapacityPolicy
 {
-    public CapacityPolicy(int maxConcurrent, ConflictMode conflictMode = ConflictMode.WarnAndConfirm) { MaxConcurrent = Validate(maxConcurrent); ConflictMode = conflictMode; }
+    public CapacityPolicy(int maxConcurrent, ConflictMode conflictMode = ConflictMode.WarnAndConfirm) { MaxConcurrent = Validate(maxConcurrent); if (!Enum.IsDefined(conflictMode)) throw new ArgumentOutOfRangeException(nameof(conflictMode)); ConflictMode = conflictMode; }
     public int MaxConcurrent { get; }
     public ConflictMode ConflictMode { get; }
 
@@ -22,7 +22,7 @@ public sealed class CapacityPolicy
 
 public sealed class ConflictPolicy
 {
-    public ConflictPolicy(ConflictMode mode) => Mode = mode;
+    public ConflictPolicy(ConflictMode mode) { if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode)); Mode = mode; }
     public ConflictMode Mode { get; }
     public bool AllowsConflict(bool confirmed) => Mode == ConflictMode.Allow || Mode == ConflictMode.WarnAndConfirm && confirmed;
     public bool RequiresConfirmation(bool hasConflict) => hasConflict && Mode == ConflictMode.WarnAndConfirm;
