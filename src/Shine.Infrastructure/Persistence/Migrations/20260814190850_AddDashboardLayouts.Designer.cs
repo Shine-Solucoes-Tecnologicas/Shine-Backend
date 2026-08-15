@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Shine.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Shine.Infrastructure.Persistence;
 namespace Shine.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ShineDbContext))]
-    partial class ShineDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260814190850_AddDashboardLayouts")]
+    partial class AddDashboardLayouts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -403,158 +406,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.ToTable("FunctionalSettings");
                 });
 
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name");
-
-                    b.ToTable("CustomerAccounts");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountRole", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("IsSystem")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccountId", "Name")
-                        .IsUnique();
-
-                    b.ToTable("CustomerAccountRoles");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountRolePermission", b =>
-                {
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PermissionId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("RoleId", "PermissionId");
-
-                    b.HasIndex("PermissionId");
-
-                    b.ToTable("CustomerAccountRolePermissions");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUser", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.HasKey("AccountId", "UserId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("CustomerAccountUsers");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRole", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("AllModules")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("AllUnits")
-                        .HasColumnType("boolean");
-
-                    b.HasKey("AccountId", "UserId", "RoleId");
-
-                    b.HasIndex("RoleId");
-
-                    b.HasIndex("UserId", "RoleId");
-
-                    b.ToTable("CustomerAccountUserRoles");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleModule", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ModuleCode")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.HasKey("AccountId", "UserId", "RoleId", "ModuleCode");
-
-                    b.ToTable("CustomerAccountUserRoleModules");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleUnit", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UnitId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("AccountId", "UserId", "RoleId", "UnitId");
-
-                    b.HasIndex("UnitId");
-
-                    b.ToTable("CustomerAccountUserRoleUnits");
-                });
-
             modelBuilder.Entity("Shine.Domain.Identity.PasswordResetToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -641,9 +492,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("CustomerAccountId")
-                        .HasColumnType("uuid");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
@@ -662,8 +510,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("CustomerAccountId");
 
                     b.HasIndex("Name")
                         .IsUnique();
@@ -951,23 +797,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.ToTable("Plans");
                 });
 
-            modelBuilder.Entity("Shine.Domain.PlanEntitlement", b =>
-                {
-                    b.Property<Guid>("PlanId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Key")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<long>("Value")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("PlanId", "Key");
-
-                    b.ToTable("PlanEntitlements");
-                });
-
             modelBuilder.Entity("Shine.Domain.PlanModule", b =>
                 {
                     b.Property<Guid>("PlanId")
@@ -980,52 +809,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.HasKey("PlanId", "ModuleCode");
 
                     b.ToTable("PlanModules");
-                });
-
-            modelBuilder.Entity("Shine.Domain.TenantEntitlementOverride", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("CreatedTenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("DeletedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("UpdatedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<long>("Value")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "Key")
-                        .IsUnique();
-
-                    b.ToTable("TenantEntitlementOverrides");
                 });
 
             modelBuilder.Entity("Shine.Domain.TenantModuleOverride", b =>
@@ -1219,104 +1002,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountRole", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.CustomerAccount", "Account")
-                        .WithMany()
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Account");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountRolePermission", b =>
-                {
-                    b.HasOne("Shine.Domain.Authorization.Permission", "Permission")
-                        .WithMany()
-                        .HasForeignKey("PermissionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountRole", "Role")
-                        .WithMany("Permissions")
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Permission");
-
-                    b.Navigation("Role");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUser", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.CustomerAccount", "Account")
-                        .WithMany()
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Identity.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Account");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRole", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountRole", "Role")
-                        .WithMany()
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountUser", "Membership")
-                        .WithMany("Roles")
-                        .HasForeignKey("AccountId", "UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Membership");
-
-                    b.Navigation("Role");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleModule", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountUserRole", "Assignment")
-                        .WithMany("Modules")
-                        .HasForeignKey("AccountId", "UserId", "RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Assignment");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleUnit", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.Tenant", "Unit")
-                        .WithMany()
-                        .HasForeignKey("UnitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountUserRole", "Assignment")
-                        .WithMany("Units")
-                        .HasForeignKey("AccountId", "UserId", "RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Assignment");
-
-                    b.Navigation("Unit");
-                });
-
             modelBuilder.Entity("Shine.Domain.Identity.PasswordResetToken", b =>
                 {
                     b.HasOne("Shine.Domain.Identity.User", "User")
@@ -1339,16 +1024,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Shine.Domain.Identity.Tenant", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.CustomerAccount", "CustomerAccount")
-                        .WithMany("Tenants")
-                        .HasForeignKey("CustomerAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("CustomerAccount");
-                });
-
             modelBuilder.Entity("Shine.Domain.Identity.UserTenant", b =>
                 {
                     b.HasOne("Shine.Domain.Identity.Tenant", "Tenant")
@@ -1366,15 +1041,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Navigation("Tenant");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Shine.Domain.PlanEntitlement", b =>
-                {
-                    b.HasOne("Shine.Domain.Plan", null)
-                        .WithMany()
-                        .HasForeignKey("PlanId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Shine.Domain.PlanModule", b =>
@@ -1408,28 +1074,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Shine.Domain.DashboardLayout", b =>
                 {
                     b.Navigation("Placements");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccount", b =>
-                {
-                    b.Navigation("Tenants");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountRole", b =>
-                {
-                    b.Navigation("Permissions");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUser", b =>
-                {
-                    b.Navigation("Roles");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRole", b =>
-                {
-                    b.Navigation("Modules");
-
-                    b.Navigation("Units");
                 });
 
             modelBuilder.Entity("Shine.Domain.Identity.Tenant", b =>

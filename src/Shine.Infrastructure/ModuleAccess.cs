@@ -11,21 +11,17 @@ public interface IModuleAccess
     Task SetAsync(Guid tenantId, string moduleCode, bool enabled, CancellationToken cancellationToken = default);
 }
 
-public sealed class ModuleAccessService(ShineDbContext db, IModuleCatalog catalog) : IModuleAccess
+public sealed class ModuleAccessService(ShineDbContext db, IModuleCatalog catalog, IPlanAccess planAccess) : IModuleAccess
 {
     public async Task<IReadOnlyCollection<ModuleDescriptor>> GetAccessibleAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        var enabled = await db.ModuleAccesses.AsNoTracking()
-            .Where(access => access.TenantId == tenantId && access.Enabled)
-            .Select(access => access.ModuleCode)
-            .ToHashSetAsync(cancellationToken);
+        var enabled = await planAccess.GetAccessibleModuleCodesAsync(tenantId, cancellationToken);
         return catalog.Modules.Where(module => enabled.Contains(module.Code.Value)).ToArray();
     }
 
     public Task<bool> HasAccessAsync(Guid tenantId, string moduleCode, CancellationToken cancellationToken = default)
     {
-        var normalized = new ModuleCode(moduleCode).Value;
-        return db.ModuleAccesses.AnyAsync(access => access.TenantId == tenantId && access.ModuleCode == normalized && access.Enabled, cancellationToken);
+        return planAccess.HasAccessAsync(tenantId, moduleCode, cancellationToken);
     }
 
     public async Task SetAsync(Guid tenantId, string moduleCode, bool enabled, CancellationToken cancellationToken = default)
