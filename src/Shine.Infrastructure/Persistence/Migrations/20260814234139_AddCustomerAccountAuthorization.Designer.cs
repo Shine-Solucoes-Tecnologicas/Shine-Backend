@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Shine.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Shine.Infrastructure.Persistence;
 namespace Shine.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ShineDbContext))]
-    partial class ShineDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260814234139_AddCustomerAccountAuthorization")]
+    partial class AddCustomerAccountAuthorization
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -499,12 +502,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RoleId")
                         .HasColumnType("uuid");
 
-                    b.Property<bool>("AllModules")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("AllUnits")
-                        .HasColumnType("boolean");
-
                     b.HasKey("AccountId", "UserId", "RoleId");
 
                     b.HasIndex("RoleId");
@@ -512,47 +509,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId", "RoleId");
 
                     b.ToTable("CustomerAccountUserRoles");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleModule", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ModuleCode")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.HasKey("AccountId", "UserId", "RoleId", "ModuleCode");
-
-                    b.ToTable("CustomerAccountUserRoleModules");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleUnit", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UnitId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("AccountId", "UserId", "RoleId", "UnitId");
-
-                    b.HasIndex("UnitId");
-
-                    b.ToTable("CustomerAccountUserRoleUnits");
                 });
 
             modelBuilder.Entity("Shine.Domain.Identity.PasswordResetToken", b =>
@@ -1287,36 +1243,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Navigation("Role");
                 });
 
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleModule", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountUserRole", "Assignment")
-                        .WithMany("Modules")
-                        .HasForeignKey("AccountId", "UserId", "RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Assignment");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRoleUnit", b =>
-                {
-                    b.HasOne("Shine.Domain.Identity.Tenant", "Unit")
-                        .WithMany()
-                        .HasForeignKey("UnitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Shine.Domain.Identity.CustomerAccountUserRole", "Assignment")
-                        .WithMany("Units")
-                        .HasForeignKey("AccountId", "UserId", "RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Assignment");
-
-                    b.Navigation("Unit");
-                });
-
             modelBuilder.Entity("Shine.Domain.Identity.PasswordResetToken", b =>
                 {
                     b.HasOne("Shine.Domain.Identity.User", "User")
@@ -1423,13 +1349,6 @@ namespace Shine.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUser", b =>
                 {
                     b.Navigation("Roles");
-                });
-
-            modelBuilder.Entity("Shine.Domain.Identity.CustomerAccountUserRole", b =>
-                {
-                    b.Navigation("Modules");
-
-                    b.Navigation("Units");
                 });
 
             modelBuilder.Entity("Shine.Domain.Identity.Tenant", b =>

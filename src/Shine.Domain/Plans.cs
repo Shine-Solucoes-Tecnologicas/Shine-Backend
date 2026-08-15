@@ -23,6 +23,22 @@ public sealed class PlanModule
     public string ModuleCode { get; private set; } = null!;
 }
 
+public sealed class PlanEntitlement
+{
+    private PlanEntitlement() { }
+    public PlanEntitlement(Guid planId, string key, long value)
+    {
+        PlanId = planId;
+        Key = NormalizeKey(key);
+        if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
+        Value = value;
+    }
+    public Guid PlanId { get; private set; }
+    public string Key { get; private set; } = null!;
+    public long Value { get; private set; }
+    public static string NormalizeKey(string value) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Entitlement key is required.", nameof(value)) : value.Trim().ToUpperInvariant();
+}
+
 public sealed class TenantPlan : AuditableEntity, IMultiTenantEntity
 {
     private TenantPlan() { }
@@ -41,4 +57,14 @@ public sealed class TenantModuleOverride : AuditableEntity, IMultiTenantEntity
     public string ModuleCode { get; private set; } = null!;
     public bool Enabled { get; private set; }
     public void SetEnabled(bool enabled) => Enabled = enabled;
+}
+
+public sealed class TenantEntitlementOverride : AuditableEntity, IMultiTenantEntity
+{
+    private TenantEntitlementOverride() { }
+    public TenantEntitlementOverride(Guid tenantId, string key, long value) { TenantId = tenantId; Key = PlanEntitlement.NormalizeKey(key); if (value < 0) throw new ArgumentOutOfRangeException(nameof(value)); Value = value; }
+    public Guid Id { get; private set; } = Guid.NewGuid();
+    public Guid TenantId { get; private set; }
+    public string Key { get; private set; } = null!;
+    public long Value { get; private set; }
 }

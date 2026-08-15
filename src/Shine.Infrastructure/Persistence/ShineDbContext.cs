@@ -19,6 +19,13 @@ public sealed class ShineDbContext(
     public DbSet<User> Users => Set<User>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<CustomerAccount> CustomerAccounts => Set<CustomerAccount>();
+    public DbSet<CustomerAccountUser> CustomerAccountUsers => Set<CustomerAccountUser>();
+    public DbSet<CustomerAccountRole> CustomerAccountRoles => Set<CustomerAccountRole>();
+    public DbSet<CustomerAccountRolePermission> CustomerAccountRolePermissions => Set<CustomerAccountRolePermission>();
+    public DbSet<CustomerAccountUserRole> CustomerAccountUserRoles => Set<CustomerAccountUserRole>();
+    public DbSet<CustomerAccountUserRoleUnit> CustomerAccountUserRoleUnits => Set<CustomerAccountUserRoleUnit>();
+    public DbSet<CustomerAccountUserRoleModule> CustomerAccountUserRoleModules => Set<CustomerAccountUserRoleModule>();
     public DbSet<UserTenant> UserTenants => Set<UserTenant>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
@@ -29,8 +36,10 @@ public sealed class ShineDbContext(
     public DbSet<ModuleAccess> ModuleAccesses => Set<ModuleAccess>();
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<PlanModule> PlanModules => Set<PlanModule>();
+    public DbSet<PlanEntitlement> PlanEntitlements => Set<PlanEntitlement>();
     public DbSet<TenantPlan> TenantPlans => Set<TenantPlan>();
     public DbSet<TenantModuleOverride> TenantModuleOverrides => Set<TenantModuleOverride>();
+    public DbSet<TenantEntitlementOverride> TenantEntitlementOverrides => Set<TenantEntitlementOverride>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
@@ -38,6 +47,8 @@ public sealed class ShineDbContext(
     public DbSet<GlobalRole> GlobalRoles => Set<GlobalRole>();
     public DbSet<GlobalRolePermission> GlobalRolePermissions => Set<GlobalRolePermission>();
     public DbSet<UserGlobalRole> UserGlobalRoles => Set<UserGlobalRole>();
+    public DbSet<DashboardLayout> DashboardLayouts => Set<DashboardLayout>();
+    public DbSet<DashboardWidgetPlacement> DashboardWidgetPlacements => Set<DashboardWidgetPlacement>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -200,6 +211,55 @@ public sealed class ShineDbContext(
             entity.HasKey(tenant => tenant.Id);
             entity.Property(tenant => tenant.Name).HasMaxLength(200).IsRequired();
             entity.HasIndex(tenant => tenant.Name).IsUnique();
+            entity.HasOne(tenant => tenant.CustomerAccount).WithMany(account => account.Tenants).HasForeignKey(tenant => tenant.CustomerAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(tenant => tenant.CustomerAccountId);
+        });
+
+        modelBuilder.Entity<CustomerAccount>(entity =>
+        {
+            entity.HasKey(account => account.Id);
+            entity.Property(account => account.Name).HasMaxLength(200).IsRequired();
+            entity.HasIndex(account => account.Name);
+        });
+        modelBuilder.Entity<CustomerAccountUser>(entity =>
+        {
+            entity.HasKey(link => new { link.AccountId, link.UserId });
+            entity.HasOne(link => link.Account).WithMany().HasForeignKey(link => link.AccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(link => link.User).WithMany().HasForeignKey(link => link.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(link => link.UserId);
+        });
+        modelBuilder.Entity<CustomerAccountRole>(entity =>
+        {
+            entity.HasKey(role => role.Id);
+            entity.Property(role => role.Name).HasMaxLength(80).IsRequired();
+            entity.HasIndex(role => new { role.AccountId, role.Name }).IsUnique();
+            entity.HasOne(role => role.Account).WithMany().HasForeignKey(role => role.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<CustomerAccountRolePermission>(entity =>
+        {
+            entity.HasKey(link => new { link.RoleId, link.PermissionId });
+            entity.HasOne(link => link.Role).WithMany(role => role.Permissions).HasForeignKey(link => link.RoleId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(link => link.Permission).WithMany().HasForeignKey(link => link.PermissionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<CustomerAccountUserRole>(entity =>
+        {
+            entity.HasKey(link => new { link.AccountId, link.UserId, link.RoleId });
+            entity.HasOne(link => link.Membership).WithMany(member => member.Roles).HasForeignKey(link => new { link.AccountId, link.UserId }).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(link => link.Role).WithMany().HasForeignKey(link => link.RoleId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(link => new { link.UserId, link.RoleId });
+        });
+        modelBuilder.Entity<CustomerAccountUserRoleUnit>(entity =>
+        {
+            entity.HasKey(scope => new { scope.AccountId, scope.UserId, scope.RoleId, scope.UnitId });
+            entity.HasOne(scope => scope.Assignment).WithMany(link => link.Units).HasForeignKey(scope => new { scope.AccountId, scope.UserId, scope.RoleId }).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(scope => scope.Unit).WithMany().HasForeignKey(scope => scope.UnitId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(scope => scope.UnitId);
+        });
+        modelBuilder.Entity<CustomerAccountUserRoleModule>(entity =>
+        {
+            entity.HasKey(scope => new { scope.AccountId, scope.UserId, scope.RoleId, scope.ModuleCode });
+            entity.Property(scope => scope.ModuleCode).HasMaxLength(120).IsRequired();
+            entity.HasOne(scope => scope.Assignment).WithMany(link => link.Modules).HasForeignKey(scope => new { scope.AccountId, scope.UserId, scope.RoleId }).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<UserTenant>(entity =>
@@ -343,7 +403,11 @@ public sealed class ShineDbContext(
 
         modelBuilder.Entity<Plan>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Code).HasMaxLength(120).IsRequired(); entity.Property(x => x.Name).HasMaxLength(200).IsRequired(); entity.HasIndex(x => x.Code).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
         modelBuilder.Entity<PlanModule>(entity => { entity.HasKey(x => new { x.PlanId, x.ModuleCode }); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasOne<Plan>().WithMany(x => x.Modules).HasForeignKey(x => x.PlanId); });
+        modelBuilder.Entity<PlanEntitlement>(entity => { entity.HasKey(x => new { x.PlanId, x.Key }); entity.Property(x => x.Key).HasMaxLength(120).IsRequired(); entity.HasOne<Plan>().WithMany().HasForeignKey(x => x.PlanId); });
         modelBuilder.Entity<TenantPlan>(entity => { entity.HasKey(x => x.Id); entity.HasIndex(x => x.TenantId).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
         modelBuilder.Entity<TenantModuleOverride>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.ModuleCode).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.ModuleCode }).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
+        modelBuilder.Entity<TenantEntitlementOverride>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Key).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.Key }).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted); });
+        modelBuilder.Entity<DashboardLayout>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.DashboardKey).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.UserId, x.DashboardKey }).IsUnique(); entity.HasMany(x => x.Placements).WithOne().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.Cascade); entity.HasQueryFilter(x => !x.IsDeleted); });
+        modelBuilder.Entity<DashboardWidgetPlacement>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.WidgetKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.ModuleKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.SettingsJson).HasMaxLength(16000).IsRequired(); entity.HasIndex(x => new { x.LayoutId, x.WidgetKey }).IsUnique(); });
     }
 }

@@ -12,6 +12,7 @@ namespace Shine.Api.Controllers;
 
 [ApiController]
 [Authorize]
+[RequiresModule("SCHEDULING")]
 [Route("api/scheduling")]
 public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter) : ControllerBase
 {

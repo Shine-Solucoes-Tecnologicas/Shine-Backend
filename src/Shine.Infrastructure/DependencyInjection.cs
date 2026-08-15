@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddScoped<IFeatureFlags, FeatureFlags>();
         services.AddScoped<IModuleAccess, ModuleAccessService>();
         services.AddScoped<IPlanAccess, PlanAccess>();
+        services.AddScoped<IEntitlementAccess, EntitlementAccess>();
         services.AddOptions<PasswordPolicyOptions>()
             .BindConfiguration("PasswordPolicy")
             .ValidateDataAnnotations()
@@ -30,12 +31,16 @@ public static class DependencyInjection
         services.AddOptions<LoginSecurityOptions>().BindConfiguration("LoginSecurity");
         services.AddSingleton<IAccessTokenService, HmacAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
+        services.AddSingleton<IDashboardWidgetCatalog, DashboardWidgetCatalog>();
+        services.AddScoped<IDashboardWidgetResolver, DashboardWidgetResolver>();
+        services.AddScoped<DashboardLayoutService>();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<ICurrentTenant, CurrentTenant>();
         services.AddScoped<ITenantExecutionContext, TenantExecutionContext>();
         services.AddScoped<IOperationalLogWriter, OperationalLogWriter>();
         services.AddScoped<IPermissionAuthorization, PermissionAuthorization>();
+        services.AddScoped<ICustomerAccountAuthorization, CustomerAccountAuthorization>();
         services.AddOptions<FileStorageOptions>().BindConfiguration("FileStorage");
         services.AddSingleton<IFileStorage, LocalFileStorage>();
         services.AddOptions<ConnectionStringOptions>()
@@ -58,6 +63,15 @@ public static class DependencyInjection
         {
             Endpoints = [new ModuleEndpoint("GET", "/api/modules")],
             Services = [new ModuleService("IModuleCatalog", "Singleton")]
+        });
+        catalog.Register(ModuleDescriptor.Create(
+            "SCHEDULING",
+            "Scheduling",
+            "Professionals, services, availability and appointments.",
+            dependencies: ["CORE"]) with
+        {
+            Endpoints = [new ModuleEndpoint("GET", "/api/scheduling")],
+            Services = [new ModuleService("SchedulingDbContext", "Scoped")]
         });
         return catalog;
     }
