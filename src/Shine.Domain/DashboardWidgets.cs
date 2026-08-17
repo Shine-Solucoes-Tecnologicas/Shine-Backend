@@ -3,9 +3,9 @@ namespace Shine.Domain;
 /// <summary>Stable identity and presentation metadata for a dashboard widget published by a module.</summary>
 public sealed class DashboardWidgetDescriptor
 {
-    public DashboardWidgetDescriptor(string widgetKey, string moduleKey, string title, string description, string requiredPermission, int defaultWidth = 2, int defaultHeight = 1, int minWidth = 1, int minHeight = 1)
+    public DashboardWidgetDescriptor(string widgetKey, string moduleKey, string title, string description, string requiredPermission, int defaultWidth = 2, int defaultHeight = 1, int minWidth = 1, int minHeight = 1, string settingsSchemaVersion = "1", string dataSource = "internal")
     {
-        WidgetKey = NormalizeWidgetKey(widgetKey, nameof(widgetKey)); ModuleKey = Normalize(moduleKey, nameof(moduleKey)); Title = Require(title, nameof(title)); Description = Require(description, nameof(description)); RequiredPermission = Require(requiredPermission, nameof(requiredPermission)); DefaultWidth = defaultWidth; DefaultHeight = defaultHeight; MinWidth = minWidth; MinHeight = minHeight; Validate();
+        WidgetKey = NormalizeWidgetKey(widgetKey, nameof(widgetKey)); ModuleKey = Normalize(moduleKey, nameof(moduleKey)); Title = Require(title, nameof(title)); Description = Require(description, nameof(description)); RequiredPermission = Require(requiredPermission, nameof(requiredPermission)); DefaultWidth = defaultWidth; DefaultHeight = defaultHeight; MinWidth = minWidth; MinHeight = minHeight; SettingsSchemaVersion = Require(settingsSchemaVersion, nameof(settingsSchemaVersion)); DataSource = Require(dataSource, nameof(dataSource)); Validate();
     }
     public string WidgetKey { get; }
     public string ModuleKey { get; }
@@ -16,6 +16,8 @@ public sealed class DashboardWidgetDescriptor
     public int DefaultHeight { get; }
     public int MinWidth { get; }
     public int MinHeight { get; }
+    public string SettingsSchemaVersion { get; }
+    public string DataSource { get; }
 
     public DashboardWidgetDescriptor Validate()
     {

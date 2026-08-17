@@ -22,13 +22,18 @@ public static class AuthorizationSeed
         ["admin.audit"] = "Consultar auditoria administrativa",
         ["dashboard.read"] = "Visualizar widgets e layout do dashboard",
         ["dashboard.manage"] = "Personalizar o layout do dashboard",
+        ["files.read"] = "Visualizar arquivos da organização",
+        ["files.manage"] = "Enviar e excluir arquivos da organização",
+        ["notifications.manage"] = "Criar notificações internas da organização",
         ["account.read"] = "Visualizar a organização",
         ["account.manage"] = "Gerenciar a organização",
         ["account.access.manage"] = "Gerenciar usuários, papéis e escopos da organização",
         ["billing.read"] = "Visualizar cobranças e faturas",
         ["billing.manage"] = "Gerenciar cobrança da organização",
         ["subscriptions.read"] = "Visualizar assinaturas e planos contratados",
-        ["subscriptions.manage"] = "Gerenciar assinaturas e planos contratados"
+        ["subscriptions.manage"] = "Gerenciar assinaturas e planos contratados",
+        ["billing.commercial.read"] = "Consultar contratos e condições comerciais da plataforma",
+        ["billing.commercial.manage"] = "Gerenciar contratos e condições comerciais da plataforma"
     };
 
     public static async Task SeedCustomerAccountDefaultsAsync(ShineDbContext db, Guid accountId, Guid administratorUserId, CancellationToken cancellationToken = default)
@@ -38,8 +43,8 @@ public static class AuthorizationSeed
         {
             [CustomerAccountRole.AdministratorName] = ["account.read", "account.manage", "account.access.manage", "billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
             [CustomerAccountRole.FinancialName] = ["billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
-            [CustomerAccountRole.ViewerName] = ["tenant.read", "scheduling.read", "dashboard.read"],
-            [CustomerAccountRole.EditorName] = ["tenant.read", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage"]
+            [CustomerAccountRole.ViewerName] = ["tenant.read", "scheduling.read", "dashboard.read", "files.read"],
+            [CustomerAccountRole.EditorName] = ["tenant.read", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage"]
         };
 
         var existing = await db.CustomerAccountRoles.Where(x => x.AccountId == accountId && definitions.Keys.Contains(x.Name)).ToDictionaryAsync(x => x.Name, StringComparer.Ordinal, cancellationToken);
@@ -65,7 +70,7 @@ public static class AuthorizationSeed
     {
         var permissions = await EnsureInitialPermissionsAsync(db, cancellationToken);
         var permissionByCode = permissions.ToDictionary(item => item.Code, StringComparer.Ordinal);
-        var roleNames = new[] { GlobalRole.PlatformAdminName, GlobalRole.SupportName, GlobalRole.AuditorName };
+        var roleNames = new[] { GlobalRole.PlatformAdminName, GlobalRole.SupportName, GlobalRole.AuditorName, GlobalRole.CommercialManagerName };
         var roles = await db.GlobalRoles.Where(item => roleNames.Contains(item.Name)).ToDictionaryAsync(item => item.Name, StringComparer.Ordinal, cancellationToken);
         foreach (var name in roleNames)
         {
@@ -78,9 +83,10 @@ public static class AuthorizationSeed
 
         var assignments = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            [GlobalRole.PlatformAdminName] = ["admin.read", "admin.manage", "admin.audit"],
+            [GlobalRole.PlatformAdminName] = ["admin.read", "admin.manage", "admin.audit", "billing.commercial.read", "billing.commercial.manage"],
             [GlobalRole.SupportName] = ["admin.read", "admin.manage"],
-            [GlobalRole.AuditorName] = ["admin.read", "admin.audit"]
+            [GlobalRole.AuditorName] = ["admin.read", "admin.audit", "billing.commercial.read"],
+            [GlobalRole.CommercialManagerName] = ["billing.commercial.read", "billing.commercial.manage"]
         };
         foreach (var (roleName, codes) in assignments)
         foreach (var code in codes)

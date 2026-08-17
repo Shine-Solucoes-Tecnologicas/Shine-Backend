@@ -26,16 +26,21 @@ public sealed class PlanModule
 public sealed class PlanEntitlement
 {
     private PlanEntitlement() { }
-    public PlanEntitlement(Guid planId, string key, long value)
+    public PlanEntitlement(Guid planId, string key, long value, EntitlementState state = EntitlementState.Active, DateTime? startsAtUtc = null, DateTime? expiresAtUtc = null, int version = 1, bool isUnlimited = false)
     {
         PlanId = planId;
-        Key = NormalizeKey(key);
-        if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
-        Value = value;
+        var grant = new EntitlementGrant(key, value, "plan", state, startsAtUtc, expiresAtUtc, version, isUnlimited);
+        Key = grant.Key; Value = grant.Value; State = grant.State; StartsAtUtc = grant.StartsAtUtc; ExpiresAtUtc = grant.ExpiresAtUtc; Version = grant.Version; IsUnlimited = grant.IsUnlimited;
     }
     public Guid PlanId { get; private set; }
     public string Key { get; private set; } = null!;
     public long Value { get; private set; }
+    public EntitlementState State { get; private set; }
+    public DateTime? StartsAtUtc { get; private set; }
+    public DateTime? ExpiresAtUtc { get; private set; }
+    public int Version { get; private set; }
+    public bool IsUnlimited { get; private set; }
+    public void ChangeState(EntitlementState state) { State = state; Version++; }
     public static string NormalizeKey(string value) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Entitlement key is required.", nameof(value)) : value.Trim().ToUpperInvariant();
 }
 
@@ -46,6 +51,11 @@ public sealed class TenantPlan : AuditableEntity, IMultiTenantEntity
     public Guid Id { get; private set; } = Guid.NewGuid();
     public Guid TenantId { get; private set; }
     public Guid PlanId { get; private set; }
+    public void ChangePlan(Guid planId)
+    {
+        if (planId == Guid.Empty) throw new ArgumentException("Plan is required.", nameof(planId));
+        PlanId = planId;
+    }
 }
 
 public sealed class TenantModuleOverride : AuditableEntity, IMultiTenantEntity
@@ -62,9 +72,15 @@ public sealed class TenantModuleOverride : AuditableEntity, IMultiTenantEntity
 public sealed class TenantEntitlementOverride : AuditableEntity, IMultiTenantEntity
 {
     private TenantEntitlementOverride() { }
-    public TenantEntitlementOverride(Guid tenantId, string key, long value) { TenantId = tenantId; Key = PlanEntitlement.NormalizeKey(key); if (value < 0) throw new ArgumentOutOfRangeException(nameof(value)); Value = value; }
+    public TenantEntitlementOverride(Guid tenantId, string key, long value, EntitlementState state = EntitlementState.Active, DateTime? startsAtUtc = null, DateTime? expiresAtUtc = null, int version = 1, bool isUnlimited = false) { TenantId = tenantId; var grant = new EntitlementGrant(key, value, "tenant-override", state, startsAtUtc, expiresAtUtc, version, isUnlimited); Key = grant.Key; Value = grant.Value; State = grant.State; StartsAtUtc = grant.StartsAtUtc; ExpiresAtUtc = grant.ExpiresAtUtc; Version = grant.Version; IsUnlimited = grant.IsUnlimited; }
     public Guid Id { get; private set; } = Guid.NewGuid();
     public Guid TenantId { get; private set; }
     public string Key { get; private set; } = null!;
     public long Value { get; private set; }
+    public EntitlementState State { get; private set; }
+    public DateTime? StartsAtUtc { get; private set; }
+    public DateTime? ExpiresAtUtc { get; private set; }
+    public int Version { get; private set; }
+    public bool IsUnlimited { get; private set; }
+    public void ChangeState(EntitlementState state) { State = state; Version++; }
 }

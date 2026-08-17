@@ -12,6 +12,26 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: shine
+          POSTGRES_USER: shine
+          POSTGRES_PASSWORD: Shine
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shine -d shine"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      ConnectionStrings__ShineDb: Host=localhost;Port=5432;Database=shine;Username=shine;Password=Shine
+      Jwt__Secret: Shine.CI.Jwt.Secret.2026.Must.Be.At.Least.32.Bytes
+      Jwt__Issuer: Shine
+      Jwt__Audience: Shine.Api
+      RabbitMq__Enabled: "false"
 
     steps:
       - name: Checkout
@@ -28,8 +48,11 @@ jobs:
       - name: Build
         run: dotnet build Shine.Backend.slnx --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test Shine.Backend.slnx --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+      - name: Unit tests
+        run: dotnet test tests/Shine.UnitTests/Shine.UnitTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+
+      - name: Integration tests
+        run: dotnet test tests/Shine.IntegrationTests/Shine.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4

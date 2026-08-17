@@ -154,8 +154,14 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
     [AllowAnonymous]
     public async Task<ActionResult<RefreshResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken)
     {
-        var current = await dbContext.RefreshTokens.Include(item => item.User).SingleOrDefaultAsync(item => item.TokenHash == RefreshTokenHash.Hash(request.RefreshToken), cancellationToken);
-        if (current is null || !current.IsActive(DateTime.UtcNow) || !current.User.IsActive) return Unauthorized();
+        var tokenHash = RefreshTokenHash.Hash(request.RefreshToken);
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken);
+        var current = await dbContext.RefreshTokens.FromSqlInterpolated($$"""
+            SELECT * FROM "RefreshTokens" WHERE "TokenHash" = {{tokenHash}} FOR UPDATE
+            """).SingleOrDefaultAsync(cancellationToken);
+        if (current is null || !current.IsActive(DateTime.UtcNow)) return Unauthorized();
+        var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Id == current.UserId, cancellationToken);
+        if (user is null || !user.IsActive) return Unauthorized();
         if (current.TenantId is Guid refreshTenantId && !await dbContext.Tenants.AnyAsync(tenant => tenant.Id == refreshTenantId && tenant.IsActive, cancellationToken))
             return Unauthorized();
 
@@ -168,6 +174,7 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
             : [];
         var access = accessTokenService.Create(current.UserId, current.TenantId, current.UserTenantId, roles);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Ok(new RefreshResponse(access.Token, access.ExpiresAtUtc, replacement.Raw));
     }
 

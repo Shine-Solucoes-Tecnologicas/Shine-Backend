@@ -22,6 +22,8 @@ public static class DependencyInjection
         services.AddScoped<IModuleAccess, ModuleAccessService>();
         services.AddScoped<IPlanAccess, PlanAccess>();
         services.AddScoped<IEntitlementAccess, EntitlementAccess>();
+        services.AddScoped<IEntitlementLimitGuard, EntitlementLimitGuard>();
+        services.AddSingleton<IEntitlementKeyCatalog, EntitlementKeyCatalog>();
         services.AddOptions<PasswordPolicyOptions>()
             .BindConfiguration("PasswordPolicy")
             .ValidateDataAnnotations()
@@ -31,7 +33,7 @@ public static class DependencyInjection
         services.AddOptions<LoginSecurityOptions>().BindConfiguration("LoginSecurity");
         services.AddSingleton<IAccessTokenService, HmacAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
-        services.AddSingleton<IDashboardWidgetCatalog, DashboardWidgetCatalog>();
+        services.AddSingleton<IDashboardWidgetCatalog>(_ => CreateDashboardWidgetCatalog());
         services.AddScoped<IDashboardWidgetResolver, DashboardWidgetResolver>();
         services.AddScoped<DashboardLayoutService>();
         services.AddHttpContextAccessor();
@@ -43,6 +45,7 @@ public static class DependencyInjection
         services.AddScoped<ICustomerAccountAuthorization, CustomerAccountAuthorization>();
         services.AddOptions<FileStorageOptions>().BindConfiguration("FileStorage");
         services.AddSingleton<IFileStorage, LocalFileStorage>();
+        services.AddScoped<StoredFileDeletionProcessor>();
         services.AddOptions<ConnectionStringOptions>()
             .BindConfiguration("ConnectionStrings")
             .ValidateDataAnnotations()
@@ -74,5 +77,22 @@ public static class DependencyInjection
             Services = [new ModuleService("SchedulingDbContext", "Scoped")]
         });
         return catalog;
+    }
+
+    private static IDashboardWidgetCatalog CreateDashboardWidgetCatalog()
+    {
+        var catalog = new DashboardWidgetCatalog();
+        catalog.Register(new EmptyDashboardWidgetProvider(new DashboardWidgetDescriptor(
+            "core.welcome", "CORE", "Visão geral", "Resumo da organização", "dashboard.read", dataSource: "core")));
+        catalog.Register(new EmptyDashboardWidgetProvider(new DashboardWidgetDescriptor(
+            "scheduling.next-appointments", "SCHEDULING", "Próximos agendamentos", "Próximos compromissos da agenda", "scheduling.read", defaultWidth: 2, defaultHeight: 2, dataSource: "scheduling.appointments")));
+        return catalog;
+    }
+
+    private sealed class EmptyDashboardWidgetProvider(DashboardWidgetDescriptor descriptor) : IDashboardWidgetProvider
+    {
+        public DashboardWidgetDescriptor Descriptor { get; } = descriptor;
+        public Task<DashboardWidgetData> GetDataAsync(DashboardWidgetContext context, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new DashboardWidgetData(Descriptor.WidgetKey, new Dictionary<string, object?> { ["items"] = Array.Empty<object>() }));
     }
 }

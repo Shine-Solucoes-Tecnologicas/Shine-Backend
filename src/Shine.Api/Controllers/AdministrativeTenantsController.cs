@@ -24,7 +24,8 @@ public sealed class AdministrativeTenantsController(ShineDbContext db, ICurrentU
 
         tenant.Suspend(request.Reason, administratorUserId.Value, DateTime.UtcNow);
         var userIds = await db.UserTenants.Where(link => link.TenantId == tenantId).Select(link => link.UserId).ToArrayAsync(cancellationToken);
-        var sessions = await db.RefreshTokens.Where(token => userIds.Contains(token.UserId) && token.RevokedAtUtc == null).ToListAsync(cancellationToken);
+        var sessions = await db.RefreshTokens.Where(token => userIds.Contains(token.UserId) &&
+            token.TenantId == tenantId && token.RevokedAtUtc == null).ToListAsync(cancellationToken);
         foreach (var session in sessions) session.Revoke(DateTime.UtcNow);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();

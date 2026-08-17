@@ -8,5 +8,11 @@ public sealed class ShineAuthenticationHandler(IOptionsMonitor<AuthenticationSch
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
-        => Task.FromResult(AuthenticateResult.NoResult());
+    {
+        if (Context.User.Identity?.IsAuthenticated != true)
+            return Task.FromResult(AuthenticateResult.NoResult());
+
+        var ticket = new AuthenticationTicket(Context.User, Scheme.Name);
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
 }

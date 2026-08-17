@@ -5,6 +5,18 @@ namespace Shine.UnitTests;
 public sealed class TenantExecutionContextTests
 {
     [Fact]
+    public void Explicit_tenant_scope_supports_anonymous_route_without_allowing_authenticated_switch()
+    {
+        var selected = Guid.NewGuid();
+        var anonymous = new TenantExecutionContext(new FakeTenantContext(null, []));
+        using (anonymous.EnterTenant(selected)) Assert.Equal(selected, anonymous.EffectiveTenantId);
+        Assert.Null(anonymous.EffectiveTenantId);
+
+        var authenticated = new TenantExecutionContext(new FakeTenantContext(Guid.NewGuid(), []));
+        Assert.Throws<Shine.Domain.TenantIsolationException>(() => authenticated.EnterTenant(selected));
+    }
+
+    [Fact]
     public void Requires_an_active_tenant_when_not_bypassing()
     {
         var context = new TenantExecutionContext(new FakeTenantContext(null, []));
