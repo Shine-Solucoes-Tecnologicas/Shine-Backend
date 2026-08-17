@@ -98,14 +98,15 @@ public sealed class AuthorizationPipelineTests(DatabaseFixture fixture)
 
     private static AuthenticationHeaderValue Bearer(Guid userId, Guid? tenantId, Guid? userTenantId)
     {
-        var service = new HmacAccessTokenService(Options.Create(new JwtOptions
+        var options = Options.Create(new JwtOptions
         {
             Secret = JwtSecret,
             Issuer = "Shine",
             Audience = "Shine.Api",
             AccessTokenMinutes = 5
-        }));
-        return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, []).Token);
+        });
+        var service = new JwtAccessTokenService(options, new JwtSigningKeyRing(options));
+        return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, Array.Empty<string>()).Token);
     }
 
     private static string ConnectionString() => Environment.GetEnvironmentVariable("ConnectionStrings__ShineDb")

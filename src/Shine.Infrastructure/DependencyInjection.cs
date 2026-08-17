@@ -29,9 +29,13 @@ public static class DependencyInjection
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
-        services.AddOptions<JwtOptions>().BindConfiguration("Jwt");
+        services.AddOptions<JwtOptions>()
+            .BindConfiguration("Jwt")
+            .Validate(options => JwtSigningKeyRing.TryValidate(options, out _), "JWT configuration is invalid.")
+            .ValidateOnStart();
         services.AddOptions<LoginSecurityOptions>().BindConfiguration("LoginSecurity");
-        services.AddSingleton<IAccessTokenService, HmacAccessTokenService>();
+        services.AddSingleton<JwtSigningKeyRing>();
+        services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
         services.AddSingleton<IDashboardWidgetCatalog>(_ => CreateDashboardWidgetCatalog());
         services.AddScoped<IDashboardWidgetResolver, DashboardWidgetResolver>();

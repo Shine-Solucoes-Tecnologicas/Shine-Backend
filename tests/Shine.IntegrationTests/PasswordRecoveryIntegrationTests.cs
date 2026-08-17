@@ -99,7 +99,7 @@ public sealed class PasswordRecoveryIntegrationTests(DatabaseFixture fixture)
     private sealed class TestPasswordHash : IPasswordHashService
     {
         public string Hash(string password) => password;
-        public bool Verify(string password, string encodedHash) => password == encodedHash;
+        public bool Verify(string password, string? encodedHash) => password == encodedHash;
     }
 
     private sealed class TestPasswordPolicy : IPasswordPolicy

@@ -4,11 +4,11 @@ using Shine.Infrastructure;
 using Shine.Api;
 using Scheduling.Infrastructure;
 using Billing.Infrastructure;
-using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration.ValidateProductionConfiguration(builder.Environment);
 builder.Services.AddApplication();
 builder.Logging.AddJsonConsole();
 var connectionString = builder.Configuration.GetSection("ConnectionStrings").Get<ConnectionStringOptions>()?.ShineDb
@@ -24,17 +24,13 @@ builder.Services.AddControllers();
 builder.Services.AddScoped<AppointmentEntitlementReconciliationService>();
 builder.Services.AddHostedService<AppointmentEntitlementReconciliationWorker>();
 builder.Services.AddHostedService<StoredFileDeletionWorker>();
+builder.Services.AddApiSecurityConfiguration(builder.Configuration, builder.Environment);
 builder.Services.AddRateLimiter(options => options.AddPolicy("public-scheduling", httpContext =>
     RateLimitPartition.GetFixedWindowLimiter(
         $"{httpContext.Connection.RemoteIpAddress}:{httpContext.Request.RouteValues["tenantId"]}",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })));
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddAuthentication("ShineJwt")
-    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ShineAuthenticationHandler>("ShineJwt", _ => { });
-builder.Services.AddCors(options => options.AddPolicy("FrontendDevelopment", policy => policy
-    .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
-    .AllowAnyHeader()
-    .AllowAnyMethod()));
+builder.Services.AddShineJwtAuthentication();
 builder.Services.AddSingleton<IPasswordRecoveryMessageTemplate, PasswordRecoveryMessageTemplate>();
 if (builder.Configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
     builder.Services.AddSingleton<IPasswordRecoveryDelivery, InMemoryPasswordRecoveryDelivery>();
@@ -59,10 +55,9 @@ var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseRouting();
-app.UseCors("FrontendDevelopment");
+app.UseCors(SecurityConfiguration.CorsPolicy);
 app.UseMiddleware<RequestDiagnosticsMiddleware>();
 app.UseRateLimiter();
-app.UseMiddleware<JwtAuthenticationMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 

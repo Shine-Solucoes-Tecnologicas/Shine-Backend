@@ -1,0 +1,17 @@
+.git
+.github
+.vs
+.vscode
+.idea
+**/bin
+**/obj
+**/TestResults
+tests
+docs
+*.user
+*.suo
+.env
+.env.*
+!.env.example
+storage
+coverage

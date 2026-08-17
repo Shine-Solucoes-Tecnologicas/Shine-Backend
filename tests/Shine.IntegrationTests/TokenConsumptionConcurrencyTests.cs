@@ -80,7 +80,7 @@ public sealed class TokenConsumptionConcurrencyTests(DatabaseFixture fixture)
     private sealed class TestPasswordHash : IPasswordHashService
     {
         public string Hash(string password) => $"hashed:{password}";
-        public bool Verify(string password, string encodedHash) => encodedHash == Hash(password);
+        public bool Verify(string password, string? encodedHash) => encodedHash == Hash(password);
     }
 
     private sealed class TestPasswordPolicy : IPasswordPolicy

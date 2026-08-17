@@ -6,7 +6,7 @@ namespace Shine.Infrastructure;
 public interface IPasswordHashService
 {
     string Hash(string password);
-    bool Verify(string password, string encodedHash);
+    bool Verify(string password, string? encodedHash);
 }
 
 public sealed class Pbkdf2PasswordHashService : IPasswordHashService
@@ -14,6 +14,12 @@ public sealed class Pbkdf2PasswordHashService : IPasswordHashService
     private const int Iterations = 210_000;
     private const int SaltSize = 16;
     private const int HashSize = 32;
+    private readonly string dummyHash;
+
+    public Pbkdf2PasswordHashService()
+    {
+        dummyHash = Hash("dummy-password-not-a-secret");
+    }
 
     public string Hash(string password)
     {
@@ -23,8 +29,9 @@ public sealed class Pbkdf2PasswordHashService : IPasswordHashService
         return $"PBKDF2${Iterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
 
-    public bool Verify(string password, string encodedHash)
+    public bool Verify(string password, string? encodedHash)
     {
+        encodedHash ??= dummyHash;
         var parts = encodedHash.Split('$');
         if (parts.Length != 4 || parts[0] != "PBKDF2" || !int.TryParse(parts[1], out var iterations))
             return false;
