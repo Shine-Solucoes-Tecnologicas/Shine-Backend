@@ -55,6 +55,9 @@ public sealed class CustomerAccountUserRole
     private CustomerAccountUserRole() { }
     public CustomerAccountUserRole(Guid accountId, Guid userId, Guid roleId, bool allUnits = false, bool allModules = false)
     {
+        if (accountId == Guid.Empty) throw new ArgumentException("Account is required.", nameof(accountId));
+        if (userId == Guid.Empty) throw new ArgumentException("User is required.", nameof(userId));
+        if (roleId == Guid.Empty) throw new ArgumentException("Role is required.", nameof(roleId));
         AccountId = accountId; UserId = userId; RoleId = roleId; AllUnits = allUnits; AllModules = allModules;
     }
     public Guid AccountId { get; private set; }

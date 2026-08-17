@@ -3,7 +3,7 @@ namespace Scheduling.Domain;
 /// <summary>Context used to resolve duration without coupling Scheduling to a UI or provider.</summary>
 public sealed record ServiceDurationContext
 {
-    public ServiceDurationContext(Guid tenantId, Guid serviceId, Guid? professionalId, IReadOnlyDictionary<string, string> attributes)
+    public ServiceDurationContext(Guid tenantId, Guid serviceId, Guid? professionalId, IReadOnlyDictionary<string, string> attributes, ServiceDurationPolicy? policy = null)
     {
         if (tenantId == Guid.Empty) throw new ArgumentException("Tenant is required.", nameof(tenantId));
         if (serviceId == Guid.Empty) throw new ArgumentException("Service is required.", nameof(serviceId));
@@ -11,12 +11,14 @@ public sealed record ServiceDurationContext
         ServiceId = serviceId;
         ProfessionalId = professionalId;
         Attributes = NormalizeAttributes(attributes);
+        Policy = policy;
     }
 
     public Guid TenantId { get; }
     public Guid ServiceId { get; }
     public Guid? ProfessionalId { get; }
     public IReadOnlyDictionary<string, string> Attributes { get; }
+    public ServiceDurationPolicy? Policy { get; }
 
     private static IReadOnlyDictionary<string, string> NormalizeAttributes(IReadOnlyDictionary<string, string> attributes)
     {
@@ -29,6 +31,16 @@ public sealed record ServiceDurationContext
             normalized[key.Trim()] = value.Trim();
         }
         return normalized;
+    }
+}
+
+public sealed record ServiceDurationPolicy(string AttributeKey, int MinutesPerUnit, int MinimumMinutes, int MaximumMinutes, string Version)
+{
+    public ServiceDurationPolicy Validate()
+    {
+        if (string.IsNullOrWhiteSpace(AttributeKey) || MinutesPerUnit <= 0 || MinimumMinutes <= 0 || MaximumMinutes < MinimumMinutes || MaximumMinutes > 1440 || string.IsNullOrWhiteSpace(Version))
+            throw new ArgumentException("Variable duration policy is invalid.");
+        return this;
     }
 }
 

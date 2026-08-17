@@ -9,6 +9,7 @@ public sealed record AppointmentStatusChangedEvent(Guid AppointmentId, Guid Tena
 
 /// <summary>Requests a future reminder processor to recalculate reminders for an appointment.</summary>
 public sealed record AppointmentReminderProcessingRequestedEvent(Guid AppointmentId, Guid TenantId, Guid ProfessionalId, Guid ServiceId, DateTime StartsAtUtc, DateTime EndsAtUtc, string Trigger, DateTime OccurredAtUtc) : AppointmentEvent(AppointmentId, TenantId, ProfessionalId, ServiceId, OccurredAtUtc);
+public sealed record AppointmentReminderInvalidatedEvent(Guid AppointmentId, Guid TenantId, Guid ProfessionalId, Guid ServiceId, string Trigger, DateTime OccurredAtUtc) : AppointmentEvent(AppointmentId, TenantId, ProfessionalId, ServiceId, OccurredAtUtc);
 
 public interface IAppointmentEventPublisher
 {

@@ -166,6 +166,51 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
+            // Preserve every existing tenant and its current authorization assignments.
+            // A legacy tenant becomes a one-unit customer account; accounts can be merged
+            // administratively later without losing memberships or permissions.
+            migrationBuilder.Sql("""
+                INSERT INTO "CustomerAccounts" ("Id", "Name", "IsActive", "CreatedAtUtc")
+                SELECT "Id", "Name", "IsActive", "CreatedAtUtc" FROM "Tenants";
+
+                UPDATE "Tenants" SET "CustomerAccountId" = "Id" WHERE "CustomerAccountId" IS NULL;
+
+                INSERT INTO "CustomerAccountUsers" ("AccountId", "UserId", "IsActive", "CreatedAtUtc")
+                SELECT "TenantId", "UserId", "IsActive", "CreatedAtUtc" FROM "UserTenants";
+
+                INSERT INTO "CustomerAccountRoles" ("Id", "AccountId", "Name", "IsSystem")
+                SELECT "Id", "TenantId", "Name", "IsSystem" FROM "Roles";
+
+                INSERT INTO "CustomerAccountRolePermissions" ("RoleId", "PermissionId")
+                SELECT "RoleId", "PermissionId" FROM "RolePermissions";
+
+                INSERT INTO "CustomerAccountUserRoles" ("AccountId", "UserId", "RoleId")
+                SELECT "TenantId", "UserId", "RoleId" FROM "UserTenantRoles";
+
+                INSERT INTO "Permissions" ("Id", "Code", "Description")
+                SELECT gen_random_uuid(), source."Code", source."Description"
+                FROM (VALUES
+                    ('account.read', 'Visualizar a organização'),
+                    ('account.manage', 'Gerenciar a organização'),
+                    ('account.access.manage', 'Gerenciar usuários, papéis e escopos da organização'),
+                    ('billing.read', 'Visualizar cobranças e faturas'),
+                    ('billing.manage', 'Gerenciar cobrança da organização'),
+                    ('subscriptions.read', 'Visualizar assinaturas e planos contratados'),
+                    ('subscriptions.manage', 'Gerenciar assinaturas e planos contratados')
+                ) AS source("Code", "Description")
+                WHERE NOT EXISTS (SELECT 1 FROM "Permissions" p WHERE p."Code" = source."Code");
+
+                INSERT INTO "CustomerAccountRolePermissions" ("RoleId", "PermissionId")
+                SELECT role."Id", permission."Id"
+                FROM "CustomerAccountRoles" role
+                CROSS JOIN "Permissions" permission
+                WHERE role."Name" IN ('Owner', 'Administrator')
+                  AND permission."Code" IN ('account.read', 'account.manage', 'account.access.manage', 'billing.read', 'billing.manage', 'subscriptions.read', 'subscriptions.manage')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM "CustomerAccountRolePermissions" existing
+                      WHERE existing."RoleId" = role."Id" AND existing."PermissionId" = permission."Id");
+                """);
+
             migrationBuilder.CreateIndex(
                 name: "IX_Tenants_CustomerAccountId",
                 table: "Tenants",

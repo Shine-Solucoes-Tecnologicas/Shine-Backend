@@ -25,6 +25,13 @@ namespace Shine.Infrastructure.Persistence.Migrations
                 nullable: false,
                 defaultValue: false);
 
+            // Roles copied from the legacy tenant-scoped model were unrestricted inside
+            // that tenant. Preserve that behavior explicitly in the new scope model.
+            migrationBuilder.Sql("""
+                UPDATE "CustomerAccountUserRoles"
+                SET "AllUnits" = TRUE, "AllModules" = TRUE;
+                """);
+
             migrationBuilder.CreateTable(
                 name: "CustomerAccountUserRoleModules",
                 columns: table => new

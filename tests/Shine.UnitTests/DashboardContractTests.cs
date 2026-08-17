@@ -11,6 +11,8 @@ public sealed class DashboardContractTests
 
         Assert.Equal("AGENDA.NEXT", descriptor.WidgetKey);
         Assert.Equal("SCHEDULING", descriptor.ModuleKey);
+        Assert.Equal("1", descriptor.SettingsSchemaVersion);
+        Assert.Equal("internal", descriptor.DataSource);
     }
 
     [Fact]

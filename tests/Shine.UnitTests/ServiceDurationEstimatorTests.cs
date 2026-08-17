@@ -43,6 +43,24 @@ public sealed class ServiceDurationEstimatorTests
         Assert.Throws<ArgumentOutOfRangeException>(() => estimator.Estimate(Context(), 0));
     }
 
+    [Fact]
+    public void Configured_rule_uses_allowed_attribute_and_clamps_to_limits()
+    {
+        var policy = new ServiceDurationPolicy("length", 15, 30, 90, "length-v2");
+        var context = new ServiceDurationContext(Guid.NewGuid(), Guid.NewGuid(), null, new Dictionary<string, string> { ["length"] = "5" }, policy);
+        var estimate = new ServiceDurationEstimator([new ConfiguredAttributeDurationRule()]).Estimate(context, 30);
+        Assert.Equal(90, estimate.DurationMinutes);
+        Assert.Equal("length-v2", estimate.RuleVersion);
+    }
+
+    [Fact]
+    public void Configured_rule_rejects_missing_required_attribute()
+    {
+        var policy = new ServiceDurationPolicy("length", 15, 30, 90, "length-v2");
+        var context = new ServiceDurationContext(Guid.NewGuid(), Guid.NewGuid(), null, new Dictionary<string, string>(), policy);
+        Assert.Throws<ArgumentException>(() => new ServiceDurationEstimator([new ConfiguredAttributeDurationRule()]).Estimate(context, 30));
+    }
+
     private static ServiceDurationContext Context(params (string Key, string Value)[] attributes) =>
         new(Guid.NewGuid(), Guid.NewGuid(), null, attributes.ToDictionary(x => x.Key, x => x.Value));
 

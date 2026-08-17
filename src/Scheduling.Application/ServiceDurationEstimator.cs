@@ -34,3 +34,20 @@ public sealed class ServiceDurationEstimator(IEnumerable<IServiceDurationRule> r
             throw new ArgumentOutOfRangeException(nameof(durationMinutes));
     }
 }
+
+public sealed class ConfiguredAttributeDurationRule : IServiceDurationRule
+{
+    public string Version => "configured-attribute-v1";
+    public bool CanResolve(ServiceDurationContext context) => context.Policy is not null;
+
+    public ServiceDurationEstimate Resolve(ServiceDurationContext context, int baseDurationMinutes)
+    {
+        var policy = context.Policy!.Validate();
+        if (!context.Attributes.TryGetValue(policy.AttributeKey, out var raw) || !int.TryParse(raw, out var units) || units < 0)
+            throw new ArgumentException($"Duration attribute '{policy.AttributeKey}' is required and must be a non-negative integer.", nameof(context));
+        var calculated = (long)baseDurationMinutes + (long)units * policy.MinutesPerUnit;
+        var duration = (int)Math.Clamp(calculated, policy.MinimumMinutes, policy.MaximumMinutes);
+        return new ServiceDurationEstimate(duration, policy.MinimumMinutes, policy.MaximumMinutes, policy.Version,
+            $"Estimated from '{policy.AttributeKey}' with {units} unit(s).");
+    }
+}

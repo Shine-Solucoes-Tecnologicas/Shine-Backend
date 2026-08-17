@@ -25,7 +25,7 @@ public sealed class CustomerAccountAuthorization(ShineDbContext db) : ICustomerA
             .ToArrayAsync(cancellationToken);
 
         return assignments.Any(assignment =>
-            (assignment.AllUnits || unitId is Guid selectedUnit && assignment.Units.Any(x => x.UnitId == selectedUnit)) &&
-            (assignment.AllModules || normalizedModule is not null && assignment.Modules.Any(x => x.ModuleCode == normalizedModule)));
+            (unitId is null || assignment.AllUnits || assignment.Units.Any(x => x.UnitId == unitId.Value)) &&
+            (normalizedModule is null || assignment.AllModules || assignment.Modules.Any(x => x.ModuleCode == normalizedModule)));
     }
 }
