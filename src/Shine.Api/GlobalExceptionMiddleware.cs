@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Npgsql;
 using Shine.Domain;
 
 namespace Shine.Api;
@@ -15,6 +16,15 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
         {
             logger.LogWarning(ex, "Domain exception while processing request.");
             await WriteError(context, StatusCodes.Status400BadRequest, "domain_error", ex.Message);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.SerializationFailure)
+        {
+            logger.LogWarning(ex, "Concurrent access-management operation was rejected.");
+            await WriteError(
+                context,
+                StatusCodes.Status409Conflict,
+                "concurrent_access_change",
+                "A configuração de acesso foi alterada simultaneamente. Atualize os dados e tente novamente.");
         }
         catch (Exception ex)
         {

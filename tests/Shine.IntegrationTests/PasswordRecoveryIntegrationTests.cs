@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Shine.Domain.Identity;
 using Shine.Infrastructure;
+using Shine.Api;
+using Shine.Api.Controllers;
+using Microsoft.Extensions.Logging;
 
 namespace Shine.IntegrationTests;
 
@@ -50,5 +53,70 @@ public sealed class PasswordRecoveryIntegrationTests(DatabaseFixture fixture)
 
         Assert.False(first.IsValid(now));
         Assert.False(second.IsValid(now));
+    }
+
+    [Fact]
+    public async Task Mock_delivery_keeps_the_recovery_message_testable_without_logging_the_raw_token()
+    {
+        await using var db = fixture.CreateDb();
+        var user = new User($"mock-recovery-{Guid.NewGuid():N}@example.test", "old-hash");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var template = new CapturingTemplate();
+        var delivery = new CapturingDelivery();
+        var logger = new CapturingLogger<PasswordRecoveryController>();
+        var controller = new PasswordRecoveryController(db, new TestPasswordHash(), new TestPasswordPolicy(),
+            template, delivery, logger);
+
+        await controller.RequestRecovery(new PasswordRecoveryRequest(user.Email), default);
+
+        Assert.NotNull(template.RawToken);
+        Assert.Contains(template.RawToken, delivery.Message!.TextBody);
+        Assert.DoesNotContain(logger.Messages, message => message.Contains(template.RawToken, StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("reset-password?token=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private sealed class CapturingTemplate : IPasswordRecoveryMessageTemplate
+    {
+        public string? RawToken { get; private set; }
+        public PasswordRecoveryMessage Create(string email, string rawToken, DateTime expiresAtUtc)
+        {
+            RawToken = rawToken;
+            return new PasswordRecoveryMessage("subject", $"secret:{rawToken}", $"secret:{rawToken}");
+        }
+    }
+
+    private sealed class CapturingDelivery : IPasswordRecoveryDelivery
+    {
+        public PasswordRecoveryMessage? Message { get; private set; }
+        public Task DeliverAsync(string email, PasswordRecoveryMessage message, CancellationToken cancellationToken = default)
+        {
+            Message = message;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class TestPasswordHash : IPasswordHashService
+    {
+        public string Hash(string password) => password;
+        public bool Verify(string password, string encodedHash) => password == encodedHash;
+    }
+
+    private sealed class TestPasswordPolicy : IPasswordPolicy
+    {
+        public bool IsValid(string password, out IReadOnlyCollection<string> errors)
+        {
+            errors = [];
+            return true;
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 }

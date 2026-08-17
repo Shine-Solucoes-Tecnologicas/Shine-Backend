@@ -146,6 +146,7 @@ bin/
 obj/
 
 # IDEs
+.vs/
 .idea/
 .vscode/
 

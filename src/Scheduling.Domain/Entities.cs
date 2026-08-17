@@ -25,10 +25,22 @@ public sealed class Service
     public Guid TenantId { get; private set; }
     public string Name { get; private set; } = null!;
     public int DurationMinutes { get; private set; }
+    public string? DurationAttributeKey { get; private set; }
+    public int? MinutesPerAttributeUnit { get; private set; }
+    public int? MinimumDurationMinutes { get; private set; }
+    public int? MaximumDurationMinutes { get; private set; }
+    public string? DurationRuleVersion { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
     public void Rename(string name) => Name = Required(name, nameof(name));
     public void SetDuration(int durationMinutes) { if (durationMinutes <= 0 || durationMinutes > 1440) throw new ArgumentOutOfRangeException(nameof(durationMinutes)); DurationMinutes = durationMinutes; }
+    public void ConfigureVariableDuration(string attributeKey, int minutesPerUnit, int minimumMinutes, int maximumMinutes, string version)
+    {
+        var policy = new ServiceDurationPolicy(attributeKey.Trim(), minutesPerUnit, minimumMinutes, maximumMinutes, version.Trim()).Validate();
+        DurationAttributeKey = policy.AttributeKey; MinutesPerAttributeUnit = policy.MinutesPerUnit; MinimumDurationMinutes = policy.MinimumMinutes; MaximumDurationMinutes = policy.MaximumMinutes; DurationRuleVersion = policy.Version;
+    }
+    public void UseFixedDuration() { DurationAttributeKey = null; MinutesPerAttributeUnit = null; MinimumDurationMinutes = null; MaximumDurationMinutes = null; DurationRuleVersion = null; }
+    public ServiceDurationPolicy? GetDurationPolicy() => DurationAttributeKey is null ? null : new ServiceDurationPolicy(DurationAttributeKey, MinutesPerAttributeUnit!.Value, MinimumDurationMinutes!.Value, MaximumDurationMinutes!.Value, DurationRuleVersion!).Validate();
     public void SetActive(bool active) => IsActive = active;
     private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Value is required.", name) : value.Trim();
 }

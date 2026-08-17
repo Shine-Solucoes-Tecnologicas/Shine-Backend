@@ -30,14 +30,27 @@ public sealed class RegistrationController(
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         var user = new User(request.Email, passwordHashService.Hash(request.Password));
+        var account = new CustomerAccount(request.TenantName);
         var tenant = new Tenant(request.TenantName);
+        tenant.AssignToCustomerAccount(account.Id);
         dbContext.Users.Add(user);
+        dbContext.CustomerAccounts.Add(account);
         dbContext.Tenants.Add(tenant);
         dbContext.UserTenants.Add(new UserTenant(user.Id, tenant.Id, user.Id, isOwner: true));
+        var accountMembership = new CustomerAccountUser(account.Id, user.Id);
+        dbContext.CustomerAccountUsers.Add(accountMembership);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await AuthorizationSeed.SeedCustomerAccountDefaultsAsync(dbContext, account.Id, user.Id, cancellationToken);
         await AuthorizationSeed.SeedTenantDefaultsAsync(dbContext, tenant.Id, user.Id, user.Id, cancellationToken);
         await AuthorizationSeed.EnsureGlobalRolesAsync(dbContext, cancellationToken);
-        dbContext.ModuleAccesses.Add(new ModuleAccess(tenant.Id, "CORE"));
+        var defaultPlan = await dbContext.Plans.Include(x => x.Modules).SingleOrDefaultAsync(x => x.Code == "DEFAULT", cancellationToken);
+        if (defaultPlan is null)
+        {
+            defaultPlan = new Plan("DEFAULT", "Plano padrão");
+            defaultPlan.Modules.Add(new PlanModule(defaultPlan.Id, "SCHEDULING"));
+            dbContext.Plans.Add(defaultPlan);
+        }
+        dbContext.TenantPlans.Add(new TenantPlan(tenant.Id, defaultPlan.Id));
         await dbContext.SaveChangesAsync(cancellationToken);
         var roles = await dbContext.UserTenantRoles.Where(link => link.UserId == user.Id && link.TenantId == tenant.Id).Select(link => link.Role.Name).Distinct().ToArrayAsync(cancellationToken);
         var access = accessTokenService.Create(user.Id, tenant.Id, user.Tenants.Single().UserTenantId, roles);

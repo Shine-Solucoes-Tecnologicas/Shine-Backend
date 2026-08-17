@@ -93,10 +93,11 @@ public sealed class ModuleRequirement(string moduleCode) : IAuthorizationRequire
     public string ModuleCode { get; } = moduleCode;
 }
 
-public sealed class ModuleHandler(ICurrentTenant currentTenant, IModuleAccess moduleAccess) : AuthorizationHandler<ModuleRequirement>
+public sealed class ModuleHandler(ICurrentUser currentUser, ICurrentTenant currentTenant, IModuleAccess moduleAccess, IPermissionAuthorization permissions) : AuthorizationHandler<ModuleRequirement>
 {
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, ModuleRequirement requirement)
     {
+        if (currentUser.UserId is not Guid userId || await permissions.IsPlatformOperatorAsync(userId)) return;
         if (currentTenant.TenantId is Guid tenantId && await moduleAccess.HasAccessAsync(tenantId, requirement.ModuleCode)) context.Succeed(requirement);
     }
 }
