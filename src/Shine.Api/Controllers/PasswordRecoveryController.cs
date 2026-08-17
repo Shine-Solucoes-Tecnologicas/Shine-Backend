@@ -15,7 +15,7 @@ public sealed class PasswordRecoveryController(
     IPasswordHashService passwordHashService,
     IPasswordPolicy passwordPolicy,
     IPasswordRecoveryMessageTemplate messageTemplate,
-    IConfiguration configuration,
+    IPasswordRecoveryDelivery delivery,
     ILogger<PasswordRecoveryController> logger) : ControllerBase
 {
     [HttpPost("recovery")]
@@ -37,9 +37,8 @@ public sealed class PasswordRecoveryController(
             dbContext.PasswordResetTokens.Add(new PasswordResetToken(user.Id, tokenHash, expiresAt));
             await dbContext.SaveChangesAsync(cancellationToken);
             var message = messageTemplate.Create(user.Email, rawToken, expiresAt);
-            if (configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
-                logger.LogInformation("Mock password recovery delivery for {Email}: {Message}", user.Email, message.TextBody);
-            _ = rawToken; // Entrega será realizada pelo serviço de e-mail do DEV-47.
+            await delivery.DeliverAsync(user.Email, message, cancellationToken);
+            logger.LogInformation("Password recovery delivery prepared for {Email}; sensitive content omitted.", user.Email);
         }
 
         return Accepted();
@@ -49,11 +48,16 @@ public sealed class PasswordRecoveryController(
     public async Task<IActionResult> Reset(PasswordResetRequest request, CancellationToken cancellationToken)
     {
         if (!passwordPolicy.IsValid(request.NewPassword, out _)) return BadRequest();
-        var token = await dbContext.PasswordResetTokens.Include(item => item.User)
-            .SingleOrDefaultAsync(item => item.TokenHash == PasswordResetTokenService.Hash(request.Token), cancellationToken);
-        if (token is null || !token.IsValid(DateTime.UtcNow) || !token.User.IsActive) return BadRequest();
+        var tokenHash = PasswordResetTokenService.Hash(request.Token);
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken);
+        var token = await dbContext.PasswordResetTokens.FromSqlInterpolated($$"""
+            SELECT * FROM "PasswordResetTokens" WHERE "TokenHash" = {{tokenHash}} FOR UPDATE
+            """).SingleOrDefaultAsync(cancellationToken);
+        if (token is null || !token.IsValid(DateTime.UtcNow)) return BadRequest();
+        var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Id == token.UserId, cancellationToken);
+        if (user is null || !user.IsActive) return BadRequest();
 
-        token.User.ChangePassword(passwordHashService.Hash(request.NewPassword));
+        user.ChangePassword(passwordHashService.Hash(request.NewPassword));
         token.MarkUsed(DateTime.UtcNow);
         var now = DateTime.UtcNow;
         var sessions = await dbContext.RefreshTokens
@@ -61,6 +65,7 @@ public sealed class PasswordRecoveryController(
             .ToListAsync(cancellationToken);
         foreach (var session in sessions) session.Revoke(now);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return NoContent();
     }
 }

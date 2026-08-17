@@ -62,6 +62,7 @@ public sealed class GlobalRole
     public const string PlatformAdminName = "PlatformAdmin";
     public const string SupportName = "Support";
     public const string AuditorName = "Auditor";
+    public const string CommercialManagerName = "CommercialManager";
 
     private GlobalRole() { }
     public GlobalRole(string name)

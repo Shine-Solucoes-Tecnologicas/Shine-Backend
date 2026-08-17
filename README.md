@@ -22,5 +22,6 @@ dotnet run --project src/Shine.Api
 ```
 
 Consulte [docs/configuration.md](docs/configuration.md) para a configuração por ambiente.
+O contrato técnico de módulos e limites está em [docs/entitlements.md](docs/entitlements.md).
 
 Valide a API em `GET /api/health`.

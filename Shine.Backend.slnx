@@ -1,5 +1,8 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Billing.Domain/Billing.Domain.csproj" />
+    <Project Path="src/Billing.Application/Billing.Application.csproj" />
+    <Project Path="src/Billing.Infrastructure/Billing.Infrastructure.csproj" />
     <Project Path="src/Shine.Api/Shine.Api.csproj" />
     <Project Path="src/Shine.Application/Shine.Application.csproj" />
     <Project Path="src/Shine.Domain/Shine.Domain.csproj" />

@@ -23,3 +23,9 @@ dotnet run --project src/Shine.Api
 ```
 
 O arquivo `.env.example` contém apenas nomes e valores ilustrativos. Segredos locais devem permanecer fora do controle de versão.
+
+## Recuperação de senha em desenvolvimento
+
+Quando `PasswordRecovery__MockDelivery=true`, a mensagem de recuperação é entregue somente ao `InMemoryPasswordRecoveryDelivery`. O conteúdo fica em memória no processo para testes e depuração local e nunca é escrito no pipeline de logs.
+
+Os logs registram apenas que uma entrega foi preparada para o endereço informado. Token, URL e corpo da mensagem são sempre omitidos. O armazenamento em memória é descartado ao reiniciar a aplicação e não deve ser habilitado em produção.

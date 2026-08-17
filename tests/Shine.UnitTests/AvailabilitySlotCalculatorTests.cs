@@ -42,4 +42,22 @@ public sealed class AvailabilitySlotCalculatorTests
         Assert.Single(slots);
         Assert.Equal(new DateTime(2026, 8, 10, 10, 0, 0, DateTimeKind.Utc), slots.Single().StartsAtUtc);
     }
+
+    [Fact]
+    public void Keeps_slot_until_capacity_is_reached()
+    {
+        var date = new DateOnly(2026, 8, 10);
+        var professionalId = Guid.NewGuid();
+        var rule = new AvailabilityRule(Guid.NewGuid(), professionalId, date.DayOfWeek, new TimeSpan(9, 0, 0), new TimeSpan(10, 0, 0));
+        var occupied = new[] { (StartsAtUtc: new DateTime(2026, 8, 10, 9, 0, 0, DateTimeKind.Utc), EndsAtUtc: new DateTime(2026, 8, 10, 9, 30, 0, DateTimeKind.Utc)) };
+
+        var availableAtCapacityTwo = new AvailabilitySlotCalculator().Calculate(date, "UTC", 30, 0, 0, 30,
+            [rule], [], [], occupied, maxConcurrentAppointments: 2, conflictMode: Shine.Domain.ConflictMode.Allow);
+        var blockedAtCapacityOne = new AvailabilitySlotCalculator().Calculate(date, "UTC", 30, 0, 0, 30,
+            [rule], [], [], occupied, maxConcurrentAppointments: 1, conflictMode: Shine.Domain.ConflictMode.Allow);
+
+        var nineOClock = new DateTime(2026, 8, 10, 9, 0, 0, DateTimeKind.Utc);
+        Assert.Contains(availableAtCapacityTwo, x => x.StartsAtUtc == nineOClock);
+        Assert.DoesNotContain(blockedAtCapacityOne, x => x.StartsAtUtc == nineOClock);
+    }
 }

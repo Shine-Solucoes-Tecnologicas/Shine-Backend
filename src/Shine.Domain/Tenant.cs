@@ -13,6 +13,8 @@ public sealed class Tenant
     }
 
     public Guid Id { get; private set; }
+    public Guid? CustomerAccountId { get; private set; }
+    public CustomerAccount? CustomerAccount { get; private set; }
     public string Name { get; private set; } = null!;
     public bool IsActive { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -20,6 +22,12 @@ public sealed class Tenant
     public DateTime? SuspendedAtUtc { get; private set; }
     public Guid? SuspendedByUserId { get; private set; }
     public ICollection<UserTenant> Users { get; private set; } = new List<UserTenant>();
+
+    public void AssignToCustomerAccount(Guid accountId)
+    {
+        if (accountId == Guid.Empty) throw new ArgumentException("Customer account is required.", nameof(accountId));
+        CustomerAccountId = accountId;
+    }
 
     public void Suspend(string reason, Guid administratorUserId, DateTime nowUtc)
     {

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Shine.Domain.Authorization;
 using Shine.Domain.Identity;
 using Shine.Infrastructure.Persistence.Seed;
+using Shine.Infrastructure;
 
 namespace Shine.IntegrationTests;
 
@@ -62,5 +63,49 @@ public sealed class RegistrationAndAuthorizationPersistenceTests(DatabaseFixture
         Assert.Contains("admin.read", roles.Permissions);
         Assert.Contains("admin.manage", roles.Permissions);
         Assert.Contains("admin.audit", roles.Permissions);
+    }
+
+    [Fact]
+    public async Task Commercial_manager_has_commercial_access_without_operational_or_platform_management_permissions()
+    {
+        await using var db = fixture.CreateDb();
+        await AuthorizationSeed.EnsureGlobalRolesAsync(db);
+        var user = new User($"commercial-{Guid.NewGuid():N}@example.test", "hash");
+        var role = await db.GlobalRoles.SingleAsync(x => x.Name == GlobalRole.CommercialManagerName);
+        db.Users.Add(user);
+        db.UserGlobalRoles.Add(new UserGlobalRole(user.Id, role.Id));
+        await db.SaveChangesAsync();
+        var authorization = new PermissionAuthorization(db, new CustomerAccountAuthorization(db));
+
+        Assert.True(await authorization.HasGlobalPermissionAsync(user.Id, "billing.commercial.read"));
+        Assert.True(await authorization.HasGlobalPermissionAsync(user.Id, "billing.commercial.manage"));
+        Assert.False(await authorization.HasGlobalPermissionAsync(user.Id, "admin.manage"));
+        Assert.False(await authorization.HasPermissionAsync(user.Id, Guid.NewGuid(), "scheduling.manage"));
+    }
+
+    [Fact]
+    public async Task Customer_roles_are_accumulative_and_financial_access_does_not_grant_scheduling()
+    {
+        await using var db = fixture.CreateDb();
+        var user = new User($"account-{Guid.NewGuid():N}@example.test", "hash");
+        var account = new CustomerAccount($"Account {Guid.NewGuid():N}");
+        var tenant = new Tenant($"Unit {Guid.NewGuid():N}");
+        tenant.AssignToCustomerAccount(account.Id);
+        db.AddRange(user, account, tenant, new CustomerAccountUser(account.Id, user.Id));
+        await db.SaveChangesAsync();
+        await AuthorizationSeed.SeedCustomerAccountDefaultsAsync(db, account.Id, user.Id);
+
+        var accountAuthorization = new CustomerAccountAuthorization(db);
+        var authorization = new PermissionAuthorization(db, accountAuthorization);
+        Assert.True(await authorization.HasPermissionAsync(user.Id, tenant.Id, "billing.read"));
+        Assert.False(await authorization.HasPermissionAsync(user.Id, tenant.Id, "scheduling.read"));
+
+        var editor = await db.CustomerAccountRoles.SingleAsync(x => x.AccountId == account.Id && x.Name == CustomerAccountRole.EditorName);
+        var assignment = new CustomerAccountUserRole(account.Id, user.Id, editor.Id);
+        assignment.ReplaceScope(false, false, [tenant.Id], ["SCHEDULING"]);
+        db.CustomerAccountUserRoles.Add(assignment);
+        await db.SaveChangesAsync();
+
+        Assert.True(await authorization.HasPermissionAsync(user.Id, tenant.Id, "scheduling.read"));
     }
 }
