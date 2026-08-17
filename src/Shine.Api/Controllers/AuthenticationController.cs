@@ -5,6 +5,7 @@ using Shine.Infrastructure.Persistence;
 using Shine.Infrastructure;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
 namespace Shine.Api.Controllers;
@@ -100,6 +101,7 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
 
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting(AuthenticationRateLimitPolicies.Login)]
     [ProducesResponseType<LoginResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
@@ -111,7 +113,8 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
             candidate => candidate.NormalizedEmail == Shine.Domain.Identity.User.NormalizeEmail(request.Email), cancellationToken);
 
         var now = DateTime.UtcNow;
-        if (user is null || !user.IsActive || user.IsLoginLocked(now) || !passwordHashService.Verify(request.Password, user.PasswordHash))
+        var passwordIsValid = passwordHashService.Verify(request.Password, user?.PasswordHash);
+        if (user is null || !user.IsActive || user.IsLoginLocked(now) || !passwordIsValid)
         {
             if (user is not null && user.IsActive && !user.IsLoginLocked(now))
                 user.RegisterFailedLogin(now, loginSecurity.Value.MaxFailedAttempts, TimeSpan.FromMinutes(loginSecurity.Value.LockoutMinutes));
@@ -152,6 +155,7 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
 
     [HttpPost("refresh")]
     [AllowAnonymous]
+    [EnableRateLimiting(AuthenticationRateLimitPolicies.Refresh)]
     public async Task<ActionResult<RefreshResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken)
     {
         var tokenHash = RefreshTokenHash.Hash(request.RefreshToken);

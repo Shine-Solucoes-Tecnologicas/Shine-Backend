@@ -1,0 +1,2 @@
+# Exact Gitleaks fingerprints only. Each entry requires a matching, unexpired
+# exception recorded in docs/security-ci.md. There are no active exceptions.

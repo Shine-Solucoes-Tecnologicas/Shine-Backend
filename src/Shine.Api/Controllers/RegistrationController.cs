@@ -7,6 +7,7 @@ using Shine.Infrastructure.Persistence;
 using Shine.Infrastructure.Persistence.Seed;
 using Microsoft.Extensions.Options;
 using Shine.Domain;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Shine.Api.Controllers;
 
@@ -21,6 +22,7 @@ public sealed class RegistrationController(
     IOptions<JwtOptions> jwtOptions) : ControllerBase
 {
     [HttpPost("register")]
+    [EnableRateLimiting(AuthenticationRateLimitPolicies.Registration)]
     public async Task<ActionResult<RegistrationResponse>> Register(RegistrationRequest request, CancellationToken cancellationToken)
     {
         if (!passwordPolicy.IsValid(request.Password, out _)) return BadRequest();
