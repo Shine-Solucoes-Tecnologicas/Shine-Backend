@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Shine.Infrastructure.Persistence;
 using Microsoft.Extensions.Options;
 using Shine.Domain;
+using Shine.Application;
 
 namespace Shine.Infrastructure;
 
@@ -29,9 +30,13 @@ public static class DependencyInjection
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
-        services.AddOptions<JwtOptions>().BindConfiguration("Jwt");
+        services.AddOptions<JwtOptions>()
+            .BindConfiguration("Jwt")
+            .Validate(options => JwtSigningKeyRing.TryValidate(options, out _), "JWT configuration is invalid.")
+            .ValidateOnStart();
         services.AddOptions<LoginSecurityOptions>().BindConfiguration("LoginSecurity");
-        services.AddSingleton<IAccessTokenService, HmacAccessTokenService>();
+        services.AddSingleton<JwtSigningKeyRing>();
+        services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
         services.AddSingleton<IDashboardWidgetCatalog>(_ => CreateDashboardWidgetCatalog());
         services.AddScoped<IDashboardWidgetResolver, DashboardWidgetResolver>();
@@ -43,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<IOperationalLogWriter, OperationalLogWriter>();
         services.AddScoped<IPermissionAuthorization, PermissionAuthorization>();
         services.AddScoped<ICustomerAccountAuthorization, CustomerAccountAuthorization>();
+        services.AddScoped<ICustomerManagement, CustomerManagement>();
         services.AddOptions<FileStorageOptions>().BindConfiguration("FileStorage");
         services.AddSingleton<IFileStorage, LocalFileStorage>();
         services.AddScoped<StoredFileDeletionProcessor>();

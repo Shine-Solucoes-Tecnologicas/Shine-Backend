@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Shine.Domain.Identity;
 using Shine.Infrastructure;
 using Shine.Infrastructure.Persistence;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Shine.Api.Controllers;
 
@@ -19,6 +20,7 @@ public sealed class PasswordRecoveryController(
     ILogger<PasswordRecoveryController> logger) : ControllerBase
 {
     [HttpPost("recovery")]
+    [EnableRateLimiting(AuthenticationRateLimitPolicies.PasswordRecovery)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> RequestRecovery(PasswordRecoveryRequest request, CancellationToken cancellationToken)
     {
@@ -45,6 +47,7 @@ public sealed class PasswordRecoveryController(
     }
 
     [HttpPost("reset")]
+    [EnableRateLimiting(AuthenticationRateLimitPolicies.PasswordRecovery)]
     public async Task<IActionResult> Reset(PasswordResetRequest request, CancellationToken cancellationToken)
     {
         if (!passwordPolicy.IsValid(request.NewPassword, out _)) return BadRequest();
