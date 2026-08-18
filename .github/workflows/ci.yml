@@ -18,7 +18,7 @@ jobs:
         env:
           POSTGRES_DB: shine
           POSTGRES_USER: shine
-          POSTGRES_PASSWORD: Shine
+          POSTGRES_PASSWORD: Shine.CI.Database.Password.2026
         ports:
           - 5432:5432
         options: >-
@@ -27,7 +27,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      ConnectionStrings__ShineDb: Host=localhost;Port=5432;Database=shine;Username=shine;Password=Shine
+      ConnectionStrings__ShineDb: Host=localhost;Port=5432;Database=shine;Username=shine;Password=Shine.CI.Database.Password.2026
       Jwt__Secret: historical-placeholder-removed
       Jwt__Issuer: Shine
       Jwt__Audience: Shine.Api
@@ -35,12 +35,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.400'
 
       - name: Restore
         run: dotnet restore Shine.Backend.slnx
@@ -54,8 +54,38 @@ jobs:
       - name: Integration tests
         run: dotnet test tests/Shine.IntegrationTests/Shine.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
 
+      - name: Build API container image
+        run: docker build --tag shine-backend:ci .
+
+      - name: Verify non-root image and smoke test health check
+        run: |
+          image_user="$(docker image inspect shine-backend:ci --format '{{.Config.User}}')"
+          test -n "$image_user"
+          test "$image_user" != "0"
+          docker run --detach --name shine-api-smoke --network host \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e 'ConnectionStrings__ShineDb=Host=127.0.0.1;Port=5432;Database=shine;Username=shine;Password=Shine.CI.Database.Password.2026' \
+            -e Jwt__Issuer=Shine \
+            -e Jwt__Audience=Shine.Api \
+            -e Jwt__ActiveKeyId=ci-primary \
+            -e Jwt__SigningKeys__0__Id=ci-primary \
+            -e Jwt__SigningKeys__0__Secret=Shine.CI.Jwt.Signing.Secret.2026.With.More.Than.32.Bytes \
+            -e Cors__AllowedOrigins__0=https://ci.example.test \
+            -e RabbitMq__Enabled=false \
+            shine-backend:ci
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs shine-api-smoke
+          exit 1
+
+      - name: Remove smoke-test container
+        if: always()
+        run: docker rm --force shine-api-smoke || true
+
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: backend-coverage
           path: '**/TestResults/**/coverage.cobertura.xml'

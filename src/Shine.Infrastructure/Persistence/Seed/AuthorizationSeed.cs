@@ -24,6 +24,8 @@ public static class AuthorizationSeed
         ["dashboard.manage"] = "Personalizar o layout do dashboard",
         ["files.read"] = "Visualizar arquivos da organização",
         ["files.manage"] = "Enviar e excluir arquivos da organização",
+        ["customers.read"] = "Visualizar clientes da unidade",
+        ["customers.manage"] = "Criar e gerenciar clientes da unidade",
         ["notifications.manage"] = "Criar notificações internas da organização",
         ["account.read"] = "Visualizar a organização",
         ["account.manage"] = "Gerenciar a organização",
@@ -43,8 +45,8 @@ public static class AuthorizationSeed
         {
             [CustomerAccountRole.AdministratorName] = ["account.read", "account.manage", "account.access.manage", "billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
             [CustomerAccountRole.FinancialName] = ["billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
-            [CustomerAccountRole.ViewerName] = ["tenant.read", "scheduling.read", "dashboard.read", "files.read"],
-            [CustomerAccountRole.EditorName] = ["tenant.read", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage"]
+            [CustomerAccountRole.ViewerName] = ["tenant.read", "scheduling.read", "dashboard.read", "files.read", "customers.read"],
+            [CustomerAccountRole.EditorName] = ["tenant.read", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage", "customers.read", "customers.manage"]
         };
 
         var existing = await db.CustomerAccountRoles.Where(x => x.AccountId == accountId && definitions.Keys.Contains(x.Name)).ToDictionaryAsync(x => x.Name, StringComparer.Ordinal, cancellationToken);
