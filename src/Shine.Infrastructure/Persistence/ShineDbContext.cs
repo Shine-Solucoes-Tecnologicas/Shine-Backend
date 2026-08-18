@@ -54,6 +54,7 @@ public sealed class ShineDbContext(
     public DbSet<DashboardLayout> DashboardLayouts => Set<DashboardLayout>();
     public DbSet<DashboardWidgetPlacement> DashboardWidgetPlacements => Set<DashboardWidgetPlacement>();
     public DbSet<StoredFileMetadata> StoredFiles => Set<StoredFileMetadata>();
+    public DbSet<Customer> Customers => Set<Customer>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -189,7 +190,11 @@ public sealed class ShineDbContext(
             || propertyName.Contains("token", StringComparison.OrdinalIgnoreCase)
             || propertyName.Contains("secret", StringComparison.OrdinalIgnoreCase)
             || propertyName.Contains("credential", StringComparison.OrdinalIgnoreCase)
-            || propertyName.Contains("privatekey", StringComparison.OrdinalIgnoreCase);
+            || propertyName.Contains("privatekey", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("email", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("phone", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("taxidentifier", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("document", StringComparison.OrdinalIgnoreCase);
 
         return sensitive ? "[MASKED]" : value;
     }
@@ -451,6 +456,27 @@ public sealed class ShineDbContext(
             entity.HasIndex(x => new { x.DeletionStatus, x.NextDeletionAttemptAtUtc });
             entity.HasQueryFilter(x => !x.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass ||
                 EffectiveTenantId != null && x.TenantId == EffectiveTenantId));
+        });
+
+        modelBuilder.Entity<Customer>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.NormalizedName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Email).HasMaxLength(320);
+            entity.Property(x => x.Phone).HasMaxLength(20);
+            entity.Property(x => x.TaxIdentifier).HasMaxLength(14);
+            entity.Ignore(x => x.IsActive);
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.TenantId, x.NormalizedName });
+            entity.HasIndex(x => new { x.TenantId, x.Phone });
+            entity.HasIndex(x => new { x.TenantId, x.Email });
+            entity.HasIndex(x => new { x.TenantId, x.TaxIdentifier })
+                .IsUnique()
+                .HasFilter("\"TaxIdentifier\" IS NOT NULL AND NOT \"IsDeleted\"");
+            entity.HasQueryFilter(x => !x.IsDeleted &&
+                (tenantExecutionContext != null && tenantExecutionContext.IsBypass ||
+                 EffectiveTenantId != null && x.TenantId == EffectiveTenantId));
         });
     }
 }

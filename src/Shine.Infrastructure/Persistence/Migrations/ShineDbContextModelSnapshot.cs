@@ -213,6 +213,73 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.ToTable("UserTenantRoles");
                 });
 
+            modelBuilder.Entity("Shine.Domain.Customer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CreatedTenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("TaxIdentifier")
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Email");
+
+                    b.HasIndex("TenantId", "NormalizedName");
+
+                    b.HasIndex("TenantId", "Phone");
+
+                    b.HasIndex("TenantId", "TaxIdentifier")
+                        .IsUnique()
+                        .HasFilter("\"TaxIdentifier\" IS NOT NULL AND NOT \"IsDeleted\"");
+
+                    b.ToTable("Customers");
+                });
+
             modelBuilder.Entity("Shine.Domain.DashboardLayout", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1460,6 +1527,15 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Navigation("TenantMembership");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Shine.Domain.Customer", b =>
+                {
+                    b.HasOne("Shine.Domain.Identity.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Shine.Domain.DashboardWidgetPlacement", b =>

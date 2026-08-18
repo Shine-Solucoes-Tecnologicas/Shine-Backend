@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Shine.Infrastructure.Persistence;
 using Microsoft.Extensions.Options;
 using Shine.Domain;
+using Shine.Application;
 
 namespace Shine.Infrastructure;
 
@@ -47,6 +48,7 @@ public static class DependencyInjection
         services.AddScoped<IOperationalLogWriter, OperationalLogWriter>();
         services.AddScoped<IPermissionAuthorization, PermissionAuthorization>();
         services.AddScoped<ICustomerAccountAuthorization, CustomerAccountAuthorization>();
+        services.AddScoped<ICustomerManagement, CustomerManagement>();
         services.AddOptions<FileStorageOptions>().BindConfiguration("FileStorage");
         services.AddSingleton<IFileStorage, LocalFileStorage>();
         services.AddScoped<StoredFileDeletionProcessor>();
