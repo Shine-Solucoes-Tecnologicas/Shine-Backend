@@ -1,17 +1,39 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Billing.Domain/Billing.Domain.csproj" />
-    <Project Path="src/Billing.Application/Billing.Application.csproj" />
-    <Project Path="src/Billing.Infrastructure/Billing.Infrastructure.csproj" />
-    <Project Path="src/Shine.Api/Shine.Api.csproj" />
-    <Project Path="src/Shine.Application/Shine.Application.csproj" />
-    <Project Path="src/Shine.Domain/Shine.Domain.csproj" />
-    <Project Path="src/Shine.Infrastructure/Shine.Infrastructure.csproj" />
-    <Project Path="src/Shine.Shared/Shine.Shared.csproj" />
-    <Project Path="src/Scheduling.Domain/Scheduling.Domain.csproj" />
-    <Project Path="src/Scheduling.Application/Scheduling.Application.csproj" />
-    <Project Path="src/Scheduling.Infrastructure/Scheduling.Infrastructure.csproj" />
-    <Project Path="tests/Shine.UnitTests/Shine.UnitTests.csproj" />
-    <Project Path="tests/Shine.IntegrationTests/Shine.IntegrationTests.csproj" />
+  <Folder Name="/host/">
+    <Project Path="host/Shine.Api/Shine.Api.csproj" />
+  </Folder>
+  <Folder Name="/platform/Core/src/">
+    <Project Path="platform/Core/src/Shine.Domain/Shine.Domain.csproj" />
+    <Project Path="platform/Core/src/Shine.Application/Shine.Application.csproj" />
+    <Project Path="platform/Core/src/Shine.Infrastructure/Shine.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/platform/Core/tests/">
+    <Project Path="platform/Core/tests/Shine.Core.UnitTests/Shine.Core.UnitTests.csproj" />
+    <Project Path="platform/Core/tests/Shine.Core.IntegrationTests/Shine.Core.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/platform/Shared/">
+    <Project Path="platform/Shared/src/Shine.Shared/Shine.Shared.csproj" />
+  </Folder>
+  <Folder Name="/modules/Billing/src/">
+    <Project Path="modules/Billing/src/Billing.Domain/Billing.Domain.csproj" />
+    <Project Path="modules/Billing/src/Billing.Application/Billing.Application.csproj" />
+    <Project Path="modules/Billing/src/Billing.Infrastructure/Billing.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/modules/Billing/tests/">
+    <Project Path="modules/Billing/tests/Billing.UnitTests/Billing.UnitTests.csproj" />
+    <Project Path="modules/Billing/tests/Billing.IntegrationTests/Billing.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/modules/Scheduling/src/">
+    <Project Path="modules/Scheduling/src/Scheduling.Domain/Scheduling.Domain.csproj" />
+    <Project Path="modules/Scheduling/src/Scheduling.Application/Scheduling.Application.csproj" />
+    <Project Path="modules/Scheduling/src/Scheduling.Infrastructure/Scheduling.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/modules/Scheduling/tests/">
+    <Project Path="modules/Scheduling/tests/Scheduling.UnitTests/Scheduling.UnitTests.csproj" />
+    <Project Path="modules/Scheduling/tests/Scheduling.IntegrationTests/Scheduling.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Shine.TestKit/Shine.TestKit.csproj" />
+    <Project Path="tests/Shine.ArchitectureTests/Shine.ArchitectureTests.csproj" />
   </Folder>
 </Solution>

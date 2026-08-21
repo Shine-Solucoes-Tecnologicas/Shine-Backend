@@ -18,8 +18,8 @@ docker compose up -d
 docker compose ps
 docker exec shine-backend-postgres-1 pg_isready -U shine -d shine
 $env:ConnectionStrings__ShineDb = 'Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
-dotnet ef database update --project src/Shine.Infrastructure --startup-project src/Shine.Api
-dotnet run --project src/Shine.Api
+dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
+dotnet run --project host/Shine.Api
 ```
 
 O arquivo `.env.example` contém apenas nomes e valores ilustrativos. Segredos locais devem permanecer fora do controle de versão.

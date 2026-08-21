@@ -49,10 +49,17 @@ jobs:
         run: dotnet build Shine.Backend.slnx --no-restore --configuration Release
 
       - name: Unit tests
-        run: dotnet test tests/Shine.UnitTests/Shine.UnitTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+        run: |
+          dotnet test platform/Core/tests/Shine.Core.UnitTests/Shine.Core.UnitTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+          dotnet test modules/Billing/tests/Billing.UnitTests/Billing.UnitTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+          dotnet test modules/Scheduling/tests/Scheduling.UnitTests/Scheduling.UnitTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+          dotnet test tests/Shine.ArchitectureTests/Shine.ArchitectureTests.csproj --no-build --configuration Release --verbosity normal
 
       - name: Integration tests
-        run: dotnet test tests/Shine.IntegrationTests/Shine.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+        run: |
+          dotnet test platform/Core/tests/Shine.Core.IntegrationTests/Shine.Core.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+          dotnet test modules/Billing/tests/Billing.IntegrationTests/Billing.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+          dotnet test modules/Scheduling/tests/Scheduling.IntegrationTests/Scheduling.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
 
       - name: Build API container image
         run: docker build --tag shine-backend:ci .
