@@ -45,9 +45,16 @@ public sealed class AppointmentEventPublisher(SchedulingDbContext db) : IAppoint
         };
         if (eventType is null) return;
 
+        var metadata = new Dictionary<string, string>
+        {
+            ["professionalId"] = appointmentEvent.ProfessionalId.ToString("N"),
+            ["serviceId"] = appointmentEvent.ServiceId.ToString("N")
+        };
+        if (appointmentEvent.CustomerId is Guid customerId) metadata["customerId"] = customerId.ToString("N");
+
         var envelope = new OperationalEventEnvelope(DeterministicGuid(eventKey), eventType, 1, appointmentEvent.TenantId,
             "appointment", appointmentEvent.AppointmentId, appointmentEvent.OccurredAtUtc, eventKey,
-            new Dictionary<string, string> { ["professionalId"] = appointmentEvent.ProfessionalId.ToString("N"), ["serviceId"] = appointmentEvent.ServiceId.ToString("N") });
+            metadata);
         await AddOnceAsync(new OutboxMessage(eventType, JsonSerializer.Serialize(envelope), appointmentEvent.OccurredAtUtc,
             $"operational:{envelope.EventId:N}"), cancellationToken);
     }

@@ -15,7 +15,7 @@ namespace Shine.Api.Controllers;
 [Authorize]
 [RequiresModule("SCHEDULING")]
 [Route("api/scheduling")]
-public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter, IEntitlementLimitGuard entitlementLimits) : ControllerBase
+public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter, IEntitlementLimitGuard entitlementLimits, ICustomerReferenceValidator? customerReferences = null) : ControllerBase
 {
     [HttpGet("professionals")]
     public async Task<ActionResult<PagedResponse<ProfessionalResponse>>> Professionals([FromQuery] PagedRequest request, CancellationToken cancellationToken)
@@ -237,7 +237,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         var tenantId = RequireTenant();
         var query = db.Appointments.AsNoTracking().Where(x => x.TenantId == tenantId && x.StartsAtUtc < toUtc && x.EndsAtUtc > fromUtc);
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderBy(x => x.StartsAtUtc).Skip((request.ValidatedPage - 1) * request.ValidatedPageSize).Take(request.ValidatedPageSize).Select(x => new AppointmentResponse(x.Id, x.ProfessionalId, x.ServiceId, x.CustomerName, x.CustomerContact, x.StartsAtUtc, x.EndsAtUtc, x.Status, x.Version)).ToArrayAsync(cancellationToken);
+        var items = await query.OrderBy(x => x.StartsAtUtc).Skip((request.ValidatedPage - 1) * request.ValidatedPageSize).Take(request.ValidatedPageSize).Select(x => new AppointmentResponse(x.Id, x.ProfessionalId, x.ServiceId, x.CustomerName, x.CustomerContact, x.StartsAtUtc, x.EndsAtUtc, x.Status, x.Version, x.CustomerId)).ToArrayAsync(cancellationToken);
         return Ok(PagedResponse<AppointmentResponse>.Create(items, request.ValidatedPage, request.ValidatedPageSize, total));
     }
 
@@ -246,6 +246,9 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<AppointmentResponse>> CreateAppointment(CreateAppointmentRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        if (request.CustomerId is Guid customerId &&
+            (customerReferences is null || !await customerReferences.IsActiveInTenantAsync(tenantId, customerId, cancellationToken)))
+            return NotFound(new { code = "CUSTOMER_NOT_FOUND", message = "The requested customer was not found in the current unit." });
         var validAssociation = await db.ProfessionalServices.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.ServiceId == request.ServiceId && x.IsActive, cancellationToken);
         if (!validAssociation) return BadRequest("Professional is not associated with the service.");
         var service = await db.Services.AsNoTracking().SingleAsync(x => x.Id == request.ServiceId, cancellationToken);
@@ -258,14 +261,14 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         if (conflictCheck.BlockedBySchedule) return Conflict("Appointment conflicts with a schedule block.");
         if (conflictCheck.Policy.Blocks(conflictCheck.Conflicts.Length)) return Conflict(new { code = "CAPACITY_EXCEEDED", message = "Professional capacity is exceeded for this period.", current = conflictCheck.Conflicts.Length, capacity = conflictCheck.Policy.MaxConcurrent, conflicts = conflictCheck.Conflicts });
         if (conflictCheck.Policy.RequiresConfirmation(conflictCheck.Conflicts.Length) && !request.AllowConflict) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "Appointment overlaps an existing appointment.", current = conflictCheck.Conflicts.Length, capacity = conflictCheck.Policy.MaxConcurrent, conflicts = conflictCheck.Conflicts });
-        var item = new Appointment(tenantId, request.ProfessionalId, request.ServiceId, request.CustomerName, request.CustomerContact, request.StartsAtUtc, request.EndsAtUtc);
+        var item = new Appointment(tenantId, request.ProfessionalId, request.ServiceId, request.CustomerName, request.CustomerContact, request.StartsAtUtc, request.EndsAtUtc, request.CustomerId);
         var reservation = await entitlementLimits.TryReserveAsync(tenantId, EntitlementKeys.SchedulingActiveAppointments, item.Id, cancellationToken: cancellationToken);
         if (!reservation.Allowed)
             return EntitlementConflict(reservation);
         try
         {
             db.Appointments.Add(item);
-            await eventPublisher.PublishAsync(new AppointmentCreatedEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, item.StartsAtUtc, item.EndsAtUtc, DateTime.UtcNow), cancellationToken);
+            await eventPublisher.PublishAsync(new AppointmentCreatedEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, item.StartsAtUtc, item.EndsAtUtc, DateTime.UtcNow, item.CustomerId), cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
@@ -275,7 +278,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
                 await entitlementLimits.ReleaseAsync(tenantId, EntitlementKeys.SchedulingActiveAppointments, item.Id, CancellationToken.None);
             throw;
         }
-        return Ok(new AppointmentResponse(item.Id, item.ProfessionalId, item.ServiceId, item.CustomerName, item.CustomerContact, item.StartsAtUtc, item.EndsAtUtc, item.Status, item.Version));
+        return Ok(new AppointmentResponse(item.Id, item.ProfessionalId, item.ServiceId, item.CustomerName, item.CustomerContact, item.StartsAtUtc, item.EndsAtUtc, item.Status, item.Version, item.CustomerId));
     }
 
     [HttpPut("appointments/{appointmentId:guid}/status")]
@@ -295,7 +298,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         try
         {
             item.ChangeStatus(request.Status);
-            await eventPublisher.PublishAsync(new AppointmentStatusChangedEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, previousStatus.ToString(), item.Status.ToString(), DateTime.UtcNow), cancellationToken);
+            await eventPublisher.PublishAsync(new AppointmentStatusChangedEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, previousStatus.ToString(), item.Status.ToString(), DateTime.UtcNow, item.CustomerId), cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
         }
         catch
@@ -326,14 +329,14 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         if (conflictCheck.Policy.RequiresConfirmation(conflictCheck.Conflicts.Length) && !request.AllowConflict) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "Appointment overlaps an existing appointment.", current = conflictCheck.Conflicts.Length, capacity = conflictCheck.Policy.MaxConcurrent, conflicts = conflictCheck.Conflicts });
         var previousStartsAtUtc = item.StartsAtUtc; var previousEndsAtUtc = item.EndsAtUtc;
         item.Reschedule(request.StartsAtUtc, request.EndsAtUtc);
-        await eventPublisher.PublishAsync(new AppointmentRescheduledEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, previousStartsAtUtc, previousEndsAtUtc, item.StartsAtUtc, item.EndsAtUtc, DateTime.UtcNow), cancellationToken);
+        await eventPublisher.PublishAsync(new AppointmentRescheduledEvent(item.Id, item.TenantId, item.ProfessionalId, item.ServiceId, previousStartsAtUtc, previousEndsAtUtc, item.StartsAtUtc, item.EndsAtUtc, DateTime.UtcNow, item.CustomerId), cancellationToken);
         try
         {
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException) { return Conflict(new { code = "STALE_APPOINTMENT", message = "Appointment was changed by another user." }); }
-        return Ok(new AppointmentResponse(item.Id, item.ProfessionalId, item.ServiceId, item.CustomerName, item.CustomerContact, item.StartsAtUtc, item.EndsAtUtc, item.Status, item.Version));
+        return Ok(new AppointmentResponse(item.Id, item.ProfessionalId, item.ServiceId, item.CustomerName, item.CustomerContact, item.StartsAtUtc, item.EndsAtUtc, item.Status, item.Version, item.CustomerId));
     }
 
     private async Task<AppointmentConflictCheck> EvaluateAppointmentConflictAsync(Guid tenantId, Guid professionalId, DateTime startsAtUtc, DateTime endsAtUtc, ConflictMode? requestedMode, Guid? excludedAppointmentId, CancellationToken cancellationToken)
@@ -394,8 +397,8 @@ public sealed record AvailabilityExceptionResponse(Guid Id, DateOnly Date, TimeS
 public sealed record SchedulingSettingsRequest(int SlotIntervalMinutes, int BufferBeforeMinutes, int BufferAfterMinutes, string TimeZoneId, ConflictMode ConflictMode = ConflictMode.WarnAndConfirm, int DefaultMaxConcurrentAppointments = 1);
 public sealed record SchedulingSettingsResponse(int SlotIntervalMinutes, int BufferBeforeMinutes, int BufferAfterMinutes, string TimeZoneId, ConflictMode ConflictMode, int DefaultMaxConcurrentAppointments);
 public sealed record AvailabilitySlotResponse(DateTime StartsAtUtc, DateTime EndsAtUtc);
-public sealed record CreateAppointmentRequest(Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, bool AllowConflict = false, ConflictMode? ConflictMode = null);
+public sealed record CreateAppointmentRequest(Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, bool AllowConflict = false, ConflictMode? ConflictMode = null, Guid? CustomerId = null);
 public sealed record ChangeAppointmentStatusRequest(AppointmentStatus Status);
-public sealed record AppointmentResponse(Guid Id, Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, AppointmentStatus Status, Guid Version);
+public sealed record AppointmentResponse(Guid Id, Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact, DateTime StartsAtUtc, DateTime EndsAtUtc, AppointmentStatus Status, Guid Version, Guid? CustomerId = null);
 public sealed record ConflictAppointmentResponse(Guid Id, string CustomerName, DateTime StartsAtUtc, DateTime EndsAtUtc);
 public sealed record RescheduleAppointmentRequest(DateTime StartsAtUtc, DateTime EndsAtUtc, Guid ExpectedVersion, bool AllowConflict = false, ConflictMode? ConflictMode = null);

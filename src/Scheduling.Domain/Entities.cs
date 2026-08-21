@@ -121,14 +121,16 @@ public enum AppointmentStatus { Scheduled, Confirmed, Completed, Cancelled, NoSh
 public sealed class Appointment : Shine.Domain.IConcurrencyTracked
 {
     private Appointment() { }
-    public Appointment(Guid tenantId, Guid professionalId, Guid serviceId, string customerName, string customerContact, DateTime startsAtUtc, DateTime endsAtUtc)
+    public Appointment(Guid tenantId, Guid professionalId, Guid serviceId, string customerName, string customerContact, DateTime startsAtUtc, DateTime endsAtUtc, Guid? customerId = null)
     {
-        TenantId = tenantId; ProfessionalId = professionalId; ServiceId = serviceId; CustomerName = Required(customerName, nameof(customerName)); CustomerContact = Required(customerContact, nameof(customerContact)); SetPeriod(startsAtUtc, endsAtUtc);
+        if (customerId == Guid.Empty) throw new ArgumentException("Customer identifier is invalid.", nameof(customerId));
+        TenantId = tenantId; ProfessionalId = professionalId; ServiceId = serviceId; CustomerId = customerId; CustomerName = Required(customerName, nameof(customerName)); CustomerContact = Required(customerContact, nameof(customerContact)); SetPeriod(startsAtUtc, endsAtUtc);
     }
     public Guid Id { get; private set; } = Guid.NewGuid();
     public Guid TenantId { get; private set; }
     public Guid ProfessionalId { get; private set; }
     public Guid ServiceId { get; private set; }
+    public Guid? CustomerId { get; private set; }
     public string CustomerName { get; private set; } = null!;
     public string CustomerContact { get; private set; } = null!;
     public DateTime StartsAtUtc { get; private set; }
