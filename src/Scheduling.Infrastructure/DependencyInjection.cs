@@ -11,6 +11,7 @@ public static class DependencyInjection
             .AddSingleton<Scheduling.Domain.IServiceDurationRule, Scheduling.Application.ConfiguredAttributeDurationRule>()
             .AddSingleton<Scheduling.Application.ServiceDurationEstimator>()
             .AddScoped<Scheduling.Application.IAppointmentEventPublisher, AppointmentEventPublisher>()
+            .AddScoped<Shine.Application.ICustomerHistoryReader, CustomerAppointmentHistoryReader>()
             .AddScoped<OperationalEventPublisher>()
             .AddScoped<IOutboxMessageHandler, LoggingOutboxMessageHandler>()
             .AddHostedService<SchedulingOutboxWorker>();

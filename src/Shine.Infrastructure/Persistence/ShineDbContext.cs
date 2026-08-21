@@ -469,6 +469,7 @@ public sealed class ShineDbContext(
             entity.Ignore(x => x.IsActive);
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => new { x.TenantId, x.NormalizedName });
+            entity.HasIndex(x => new { x.TenantId, x.Id }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Phone });
             entity.HasIndex(x => new { x.TenantId, x.Email });
             entity.HasIndex(x => new { x.TenantId, x.TaxIdentifier })

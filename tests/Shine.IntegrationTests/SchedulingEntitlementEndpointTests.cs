@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Scheduling.Application;
 using Scheduling.Domain;
 using Shine.Api.Controllers;
 using Shine.Domain;
+using Shine.Domain.Identity;
 using Shine.Infrastructure;
 
 namespace Shine.IntegrationTests;
@@ -96,6 +98,98 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
             verification.Appointments.Where(x => x.TenantId == unitId && x.ProfessionalId == professional.Id && x.StartsAtUtc == target)));
     }
 
+    [Fact]
+    public async Task Authenticated_creation_links_an_active_customer_from_the_current_unit_and_publishes_the_reference()
+    {
+        var tenant = new Tenant($"Scheduling customer {Guid.NewGuid():N}");
+        var customer = new Customer(tenant.Id, "Customer snapshot source", "customer@example.test");
+        await using var customerDb = fixture.CreateDb();
+        customerDb.AddRange(tenant, customer);
+        await customerDb.SaveChangesAsync();
+
+        var professional = new Professional(tenant.Id, $"Professional {Guid.NewGuid():N}");
+        var service = new Service(tenant.Id, $"Service {Guid.NewGuid():N}", 30);
+        await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(tenant.Id));
+        schedulingDb.AddRange(professional, service, new ProfessionalService(tenant.Id, professional.Id, service.Id));
+        await schedulingDb.SaveChangesAsync();
+        var publisher = new CapturingPublisher();
+        var validator = new CustomerManagement(customerDb);
+        var controller = new SchedulingController(schedulingDb, new TestTenant(tenant.Id), new AvailabilitySlotCalculator(),
+            publisher, new NoOpLogWriter(), new UnlimitedGuard(), validator);
+        var startsAtUtc = DateTime.UtcNow.AddDays(5);
+
+        var result = await controller.CreateAppointment(new CreateAppointmentRequest(
+            professional.Id, service.Id, "Customer snapshot", "snapshot@example.test", startsAtUtc,
+            startsAtUtc.AddMinutes(30), CustomerId: customer.Id), default);
+
+        var response = Assert.IsType<AppointmentResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(customer.Id, response.CustomerId);
+        Assert.Equal("Customer snapshot", response.CustomerName);
+        var createdEvent = Assert.IsType<AppointmentCreatedEvent>(Assert.Single(publisher.Events));
+        Assert.Equal(customer.Id, createdEvent.CustomerId);
+        var persisted = await schedulingDb.Appointments.AsNoTracking().SingleAsync(x => x.Id == response.Id);
+        Assert.Equal(customer.Id, persisted.CustomerId);
+        Assert.Equal("Customer snapshot", persisted.CustomerName);
+    }
+
+    [Fact]
+    public async Task Authenticated_creation_rejects_foreign_and_inactive_customers()
+    {
+        var tenant = new Tenant($"Current unit {Guid.NewGuid():N}");
+        var otherTenant = new Tenant($"Other unit {Guid.NewGuid():N}");
+        var foreignCustomer = new Customer(otherTenant.Id, "Foreign customer");
+        var inactiveCustomer = new Customer(tenant.Id, "Inactive customer");
+        inactiveCustomer.Deactivate(DateTime.UtcNow);
+        await using var customerDb = fixture.CreateDb();
+        customerDb.AddRange(tenant, otherTenant, foreignCustomer, inactiveCustomer);
+        await customerDb.SaveChangesAsync();
+
+        var professional = new Professional(tenant.Id, $"Professional {Guid.NewGuid():N}");
+        var service = new Service(tenant.Id, $"Service {Guid.NewGuid():N}", 30);
+        await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(tenant.Id));
+        schedulingDb.AddRange(professional, service, new ProfessionalService(tenant.Id, professional.Id, service.Id));
+        await schedulingDb.SaveChangesAsync();
+        var controller = new SchedulingController(schedulingDb, new TestTenant(tenant.Id), new AvailabilitySlotCalculator(),
+            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new CustomerManagement(customerDb));
+        var startsAtUtc = DateTime.UtcNow.AddDays(6);
+
+        foreach (var customerId in new[] { foreignCustomer.Id, inactiveCustomer.Id })
+        {
+            var result = await controller.CreateAppointment(new CreateAppointmentRequest(
+                professional.Id, service.Id, "Snapshot", "contact", startsAtUtc, startsAtUtc.AddMinutes(30),
+                CustomerId: customerId), default);
+
+            var notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
+            Assert.Contains("CUSTOMER_NOT_FOUND", JsonSerializer.Serialize(notFound.Value));
+        }
+
+        Assert.False(await schedulingDb.Appointments.AnyAsync(x => x.TenantId == tenant.Id));
+    }
+
+    [Fact]
+    public async Task Database_rejects_customer_reference_from_another_unit()
+    {
+        var tenant = new Tenant($"Appointment unit {Guid.NewGuid():N}");
+        var otherTenant = new Tenant($"Customer unit {Guid.NewGuid():N}");
+        var foreignCustomer = new Customer(otherTenant.Id, "Foreign customer");
+        await using (var customerDb = fixture.CreateDb())
+        {
+            customerDb.AddRange(tenant, otherTenant, foreignCustomer);
+            await customerDb.SaveChangesAsync();
+        }
+
+        var professional = new Professional(tenant.Id, $"Professional {Guid.NewGuid():N}");
+        var service = new Service(tenant.Id, $"Service {Guid.NewGuid():N}", 30);
+        await using var schedulingDb = fixture.CreateSchedulingDb();
+        schedulingDb.AddRange(professional, service);
+        await schedulingDb.SaveChangesAsync();
+        var startsAtUtc = DateTime.UtcNow.AddDays(7);
+        schedulingDb.Appointments.Add(new Appointment(tenant.Id, professional.Id, service.Id, "Snapshot", "contact",
+            startsAtUtc, startsAtUtc.AddMinutes(30), foreignCustomer.Id));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => schedulingDb.SaveChangesAsync());
+    }
+
     private sealed record TestTenant(Guid UnitId) : ICurrentTenant
     {
         public Guid? TenantId => UnitId;
@@ -127,6 +221,16 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
     private sealed class NoOpPublisher : IAppointmentEventPublisher
     {
         public Task PublishAsync(AppointmentEvent appointmentEvent, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class CapturingPublisher : IAppointmentEventPublisher
+    {
+        public List<AppointmentEvent> Events { get; } = [];
+        public Task PublishAsync(AppointmentEvent appointmentEvent, CancellationToken cancellationToken = default)
+        {
+            Events.Add(appointmentEvent);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class NoOpLogWriter : IOperationalLogWriter
