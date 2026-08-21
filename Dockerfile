@@ -2,9 +2,11 @@
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /src
-COPY src ./src
-RUN dotnet restore src/Shine.Api/Shine.Api.csproj
-RUN dotnet publish src/Shine.Api/Shine.Api.csproj \
+COPY platform ./platform
+COPY modules ./modules
+COPY host ./host
+RUN dotnet restore host/Shine.Api/Shine.Api.csproj
+RUN dotnet publish host/Shine.Api/Shine.Api.csproj \
     --configuration Release \
     --no-restore \
     --output /app/publish \
