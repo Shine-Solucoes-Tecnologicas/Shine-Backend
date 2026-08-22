@@ -40,8 +40,17 @@ public sealed class CustomerApiTests(DatabaseFixture fixture)
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = Bearer(setup.Editor.Id, setup.Tenant.Id, setup.EditorMembership.UserTenantId);
 
-        var invalid = await client.PostAsJsonAsync("/api/v1/customers", new { name = "", email = "invalid" });
+        var invalid = await client.PostAsJsonAsync("/api/v1/customers", new
+        {
+            name = "Sensitive invalid customer",
+            email = "victim@invalid",
+            taxIdentifier = "123.456"
+        });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var invalidBody = await invalid.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("Sensitive invalid customer", invalidBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("victim@invalid", invalidBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("123.456", invalidBody, StringComparison.Ordinal);
 
         var create = await client.PostAsJsonAsync("/api/v1/customers", new
         {
@@ -105,6 +114,61 @@ public sealed class CustomerApiTests(DatabaseFixture fixture)
 
         client.DefaultRequestHeaders.Authorization = Bearer(setup.Editor.Id, setup.Tenant.Id, setup.EditorMembership.UserTenantId);
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/v1/customers", new { name = "Allowed" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Customer_endpoints_deny_financial_role_and_unit_scope_crossing()
+    {
+        var setup = await SetupAsync();
+        var siblingTenant = new Tenant($"Sibling customer API unit {Guid.NewGuid():N}");
+        siblingTenant.AssignToCustomerAccount(setup.Account.Id);
+        var financial = new User($"customer-financial-{Guid.NewGuid():N}@example.test", "hash");
+        var scopedViewer = new User($"customer-scoped-viewer-{Guid.NewGuid():N}@example.test", "hash");
+        var financialMembership = new UserTenant(financial.Id, setup.Tenant.Id, financial.Id, false);
+        var scopedMembership = new UserTenant(scopedViewer.Id, setup.Tenant.Id, scopedViewer.Id, false);
+        var scopedSiblingMembership = new UserTenant(scopedViewer.Id, siblingTenant.Id, scopedViewer.Id, false);
+        var localCustomer = new Customer(setup.Tenant.Id, "Local customer");
+        var siblingCustomer = new Customer(siblingTenant.Id, "Sibling customer");
+
+        await using (var db = fixture.CreateDb())
+        {
+            db.AddRange(siblingTenant, financial, scopedViewer, financialMembership, scopedMembership,
+                scopedSiblingMembership, localCustomer, siblingCustomer,
+                new CustomerAccountUser(setup.Account.Id, financial.Id),
+                new CustomerAccountUser(setup.Account.Id, scopedViewer.Id));
+            await db.SaveChangesAsync();
+
+            var financialRole = await db.CustomerAccountRoles.SingleAsync(x =>
+                x.AccountId == setup.Account.Id && x.Name == CustomerAccountRole.FinancialName);
+            var viewerRole = await db.CustomerAccountRoles.SingleAsync(x =>
+                x.AccountId == setup.Account.Id && x.Name == CustomerAccountRole.ViewerName);
+            db.CustomerAccountUserRoles.Add(new CustomerAccountUserRole(
+                setup.Account.Id, financial.Id, financialRole.Id, allUnits: true, allModules: true));
+            var scopedRole = new CustomerAccountUserRole(
+                setup.Account.Id, scopedViewer.Id, viewerRole.Id, allUnits: false, allModules: true);
+            scopedRole.ReplaceScope(false, true, [setup.Tenant.Id], []);
+            db.CustomerAccountUserRoles.Add(scopedRole);
+            await db.SaveChangesAsync();
+        }
+
+        await using var factory = new ApiFactory(ConnectionString(), JwtSecret);
+        using var client = factory.CreateClient();
+
+        client.DefaultRequestHeaders.Authorization = Bearer(
+            financial.Id, setup.Tenant.Id, financialMembership.UserTenantId);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/customers")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.PostAsJsonAsync("/api/v1/customers", new { name = "Financial denied" })).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = Bearer(
+            scopedViewer.Id, setup.Tenant.Id, scopedMembership.UserTenantId);
+        var localPage = await client.GetFromJsonAsync<PagedResponse<CustomerDetails>>("/api/v1/customers");
+        Assert.Contains(localPage!.Items, x => x.Id == localCustomer.Id);
+        Assert.DoesNotContain(localPage.Items, x => x.Id == siblingCustomer.Id);
+
+        client.DefaultRequestHeaders.Authorization = Bearer(
+            scopedViewer.Id, siblingTenant.Id, scopedSiblingMembership.UserTenantId);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/customers")).StatusCode);
     }
 
     [Fact]
@@ -277,8 +341,7 @@ public sealed class CustomerApiTests(DatabaseFixture fixture)
         return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, []).Token);
     }
 
-    private static string ConnectionString() => Environment.GetEnvironmentVariable("ConnectionStrings__ShineDb")
-        ?? "Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine";
+    private string ConnectionString() => fixture.ConnectionString;
 
     private sealed class ApiFactory(string connectionString, string jwtSecret) : WebApplicationFactory<Program>
     {

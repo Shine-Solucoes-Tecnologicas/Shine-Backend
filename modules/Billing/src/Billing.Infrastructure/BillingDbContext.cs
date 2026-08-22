@@ -15,6 +15,11 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<SubscriptionUnit> SubscriptionUnits => Set<SubscriptionUnit>();
     public DbSet<BillingOutboxMessage> OutboxMessages => Set<BillingOutboxMessage>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<Charge> Charges => Set<Charge>();
+    public DbSet<PaymentAttempt> PaymentAttempts => Set<PaymentAttempt>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<FinancialTransition> FinancialTransitions => Set<FinancialTransition>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -107,7 +112,14 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
                 value => $"{(int)value.Unit}:{value.Count}",
                 value => ParseInterval(value)).HasMaxLength(30).IsRequired();
             entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.CheckoutIdempotencyKey).HasMaxLength(120);
+            entity.Property(x => x.ProviderCode).HasMaxLength(80);
+            entity.Property(x => x.ExternalSubscriptionId).HasMaxLength(200);
             entity.HasIndex(x => x.AccountId);
+            entity.HasIndex(x => new { x.AccountId, x.CheckoutIdempotencyKey }).IsUnique()
+                .HasFilter("\"CheckoutIdempotencyKey\" IS NOT NULL");
+            entity.HasIndex(x => new { x.ProviderCode, x.ExternalSubscriptionId }).IsUnique()
+                .HasFilter("\"ExternalSubscriptionId\" IS NOT NULL");
             entity.HasAlternateKey(x => new { x.Id, x.AccountId });
             entity.HasMany(x => x.Units).WithOne(x => x.Subscription).HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
             entity.Navigation(x => x.Units).UsePropertyAccessMode(PropertyAccessMode.Field);
@@ -130,6 +142,54 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
             entity.Property(x => x.LastError).HasMaxLength(2000);
             entity.HasIndex(x => new { x.Status, x.NextAttemptAtUtc });
             entity.HasIndex(x => x.LockedUntilUtc);
+        });
+        modelBuilder.Entity<Invoice>(entity =>
+        {
+            entity.ToTable("BillingInvoices"); entity.HasKey(x => x.Id); entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired(); entity.Property(x => x.Status).HasConversion<int>();
+            entity.HasIndex(x => new { x.AccountId, x.IdempotencyKey }).IsUnique(); entity.HasIndex(x => new { x.AccountId, x.DueAtUtc });
+            entity.HasAlternateKey(x => new { x.Id, x.AccountId, x.SubscriptionId });
+            entity.HasOne<Subscription>().WithMany().HasForeignKey(x => new { x.SubscriptionId, x.AccountId })
+                .HasPrincipalKey(x => new { x.Id, x.AccountId }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Transitions).WithOne().HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.Transitions).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        modelBuilder.Entity<Charge>(entity =>
+        {
+            entity.ToTable("BillingCharges"); entity.HasKey(x => x.Id); entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired(); entity.Property(x => x.Status).HasConversion<int>();
+            entity.HasIndex(x => new { x.AccountId, x.IdempotencyKey }).IsUnique(); entity.HasIndex(x => new { x.AccountId, x.InvoiceId });
+            entity.HasAlternateKey(x => new { x.Id, x.AccountId, x.SubscriptionId });
+            entity.HasOne<Invoice>().WithMany().HasForeignKey(x => new { x.InvoiceId, x.AccountId, x.SubscriptionId })
+                .HasPrincipalKey(x => new { x.Id, x.AccountId, x.SubscriptionId }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(x => x.Attempts).WithOne().HasForeignKey(x => new { x.ChargeId, x.AccountId, x.SubscriptionId })
+                .HasPrincipalKey(x => new { x.Id, x.AccountId, x.SubscriptionId }).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(x => x.Payments).WithOne().HasForeignKey(x => new { x.ChargeId, x.AccountId, x.SubscriptionId })
+                .HasPrincipalKey(x => new { x.Id, x.AccountId, x.SubscriptionId }).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(x => x.Transitions).WithOne().HasForeignKey(x => x.ChargeId).OnDelete(DeleteBehavior.Cascade);
+            entity.Navigation(x => x.Attempts).UsePropertyAccessMode(PropertyAccessMode.Field); entity.Navigation(x => x.Payments).UsePropertyAccessMode(PropertyAccessMode.Field); entity.Navigation(x => x.Transitions).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        modelBuilder.Entity<PaymentAttempt>(entity =>
+        {
+            entity.ToTable("BillingPaymentAttempts"); entity.HasKey(x => x.Id); entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.ProviderCode).HasMaxLength(80).IsRequired(); entity.Property(x => x.ExternalAttemptId).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.FailureCode).HasMaxLength(120); entity.Property(x => x.Status).HasConversion<int>();
+            entity.HasIndex(x => new { x.ProviderCode, x.ExternalAttemptId }).IsUnique(); entity.HasIndex(x => new { x.AccountId, x.ChargeId });
+        });
+        modelBuilder.Entity<Payment>(entity =>
+        {
+            entity.ToTable("BillingPayments"); entity.HasKey(x => x.Id); entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.ProviderCode).HasMaxLength(80).IsRequired(); entity.Property(x => x.ExternalPaymentId).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Amount).HasPrecision(18, 2); entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            entity.HasIndex(x => new { x.ProviderCode, x.ExternalPaymentId }).IsUnique(); entity.HasIndex(x => new { x.AccountId, x.InvoiceId });
+        });
+        modelBuilder.Entity<FinancialTransition>(entity =>
+        {
+            entity.ToTable("BillingFinancialTransitions"); entity.HasKey(x => x.Id); entity.Property(x => x.Id).ValueGeneratedNever();
+            entity.Property(x => x.EntityType).HasMaxLength(30).IsRequired(); entity.Property(x => x.Action).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => new { x.AccountId, x.EntityType, x.EntityId, x.OccurredAtUtc });
         });
     }
 

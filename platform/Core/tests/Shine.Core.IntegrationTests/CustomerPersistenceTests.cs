@@ -83,6 +83,10 @@ public sealed class CustomerPersistenceTests(DatabaseFixture fixture)
         await using (var scopedDb = fixture.CreateDb(new FakeTenant(tenant.Id)))
         {
             scopedDb.Customers.Add(customer);
+            scopedDb.FunctionalSettings.Add(new FunctionalSetting(
+                $"CRM.METADATA.{Guid.NewGuid():N}",
+                "{\"contact\":\"generic@example.test\",\"metadata\":{\"card_token\":\"tok_sensitive_value\"}}",
+                tenant.Id));
             await scopedDb.SaveChangesAsync();
         }
 
@@ -95,7 +99,16 @@ public sealed class CustomerPersistenceTests(DatabaseFixture fixture)
         Assert.DoesNotContain("audit@example.com", audit.NewValuesJson);
         Assert.DoesNotContain("5511999990000", audit.NewValuesJson);
         Assert.DoesNotContain("11122233344", audit.NewValuesJson);
+        Assert.DoesNotContain("Audited", audit.NewValuesJson);
         Assert.Contains("[MASKED]", audit.NewValuesJson);
+
+        var settingAudit = await verificationDb.AuditEntries
+            .Where(x => x.EntityType == nameof(FunctionalSetting) && x.TenantId == tenant.Id)
+            .OrderByDescending(x => x.OccurredAtUtc)
+            .FirstAsync();
+        Assert.DoesNotContain("generic@example.test", settingAudit.NewValuesJson);
+        Assert.DoesNotContain("tok_sensitive_value", settingAudit.NewValuesJson);
+        Assert.Contains("[MASKED]", settingAudit.NewValuesJson);
     }
 
     private sealed class FakeTenant(Guid tenantId) : ICurrentTenant

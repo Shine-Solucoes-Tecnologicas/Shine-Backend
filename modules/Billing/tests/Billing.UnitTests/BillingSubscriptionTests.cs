@@ -72,6 +72,23 @@ public sealed class BillingSubscriptionTests
     }
 
     [Fact]
+    public void Checkout_data_is_provider_neutral_and_cannot_be_changed_after_activation()
+    {
+        var subscription = new Subscription(Guid.NewGuid(), Guid.NewGuid(), new BillingInterval(BillingIntervalUnit.Month, 1));
+        subscription.AddUnit(Guid.NewGuid());
+        subscription.PrepareCheckout("provider-a", "checkout-001");
+        subscription.AttachExternalSubscription("PROVIDER-A", "external-001");
+
+        Assert.Equal("PROVIDER-A", subscription.ProviderCode);
+        Assert.Equal("checkout-001", subscription.CheckoutIdempotencyKey);
+        Assert.Equal("external-001", subscription.ExternalSubscriptionId);
+        Assert.Throws<DomainException>(() => subscription.AttachExternalSubscription("PROVIDER-A", "external-002"));
+
+        subscription.Activate(Utc(2026, 8, 17));
+        Assert.Throws<DomainException>(() => subscription.PrepareCheckout("provider-a", "checkout-002"));
+    }
+
+    [Fact]
     public async Task Activation_service_rejects_a_second_effective_subscription_for_the_same_unit()
     {
         var unitId = Guid.NewGuid();

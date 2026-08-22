@@ -38,7 +38,9 @@ public static class DependencyInjection
         services.AddSingleton<JwtSigningKeyRing>();
         services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
-        services.AddSingleton<IDashboardWidgetCatalog>(_ => CreateDashboardWidgetCatalog());
+        services.AddSingleton<IDashboardWidgetProvider>(new EmptyDashboardWidgetProvider(new DashboardWidgetDescriptor(
+            "core.welcome", "CORE", "Visão geral", "Resumo da organização", "dashboard.read", dataSource: "core")));
+        services.AddScoped<IDashboardWidgetCatalog>(provider => CreateDashboardWidgetCatalog(provider.GetServices<IDashboardWidgetProvider>()));
         services.AddScoped<IDashboardWidgetResolver, DashboardWidgetResolver>();
         services.AddScoped<DashboardLayoutService>();
         services.AddHttpContextAccessor();
@@ -86,13 +88,10 @@ public static class DependencyInjection
         return catalog;
     }
 
-    private static IDashboardWidgetCatalog CreateDashboardWidgetCatalog()
+    private static IDashboardWidgetCatalog CreateDashboardWidgetCatalog(IEnumerable<IDashboardWidgetProvider> providers)
     {
         var catalog = new DashboardWidgetCatalog();
-        catalog.Register(new EmptyDashboardWidgetProvider(new DashboardWidgetDescriptor(
-            "core.welcome", "CORE", "Visão geral", "Resumo da organização", "dashboard.read", dataSource: "core")));
-        catalog.Register(new EmptyDashboardWidgetProvider(new DashboardWidgetDescriptor(
-            "scheduling.next-appointments", "SCHEDULING", "Próximos agendamentos", "Próximos compromissos da agenda", "scheduling.read", defaultWidth: 2, defaultHeight: 2, dataSource: "scheduling.appointments")));
+        foreach (var provider in providers) catalog.Register(provider);
         return catalog;
     }
 

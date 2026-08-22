@@ -81,7 +81,16 @@ public sealed class BillingWebhookInboxTests(DatabaseFixture fixture)
     {
         var externalEventId = $"evt-{Guid.NewGuid():N}";
         await using (var setupDb = fixture.CreateBillingDb())
-            await new ProviderWebhookInbox(setupDb).TryStoreAsync(Notification(externalEventId), new string('E', 64));
+        {
+            var inbox = new ProviderWebhookInbox(setupDb);
+            await inbox.TryStoreAsync(Notification(externalEventId), new string('E', 64));
+            var initialClaim = await inbox.ClaimAsync(
+                "sample", externalEventId, DateTime.UtcNow, TimeSpan.FromMinutes(5));
+            Assert.NotNull(initialClaim);
+            // Put this test event first regardless of pending rows left by earlier integration tests.
+            await inbox.MarkRetryAsync("sample", externalEventId, initialClaim.ProcessingId,
+                "concurrency test", DateTime.UnixEpoch);
+        }
 
         async Task<IReadOnlyCollection<ClaimedProviderEvent>> ClaimAsync()
         {
