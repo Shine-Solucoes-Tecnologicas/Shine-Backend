@@ -4,11 +4,15 @@ Base da solução .NET do Shine, preparada para arquitetura modular.
 
 ## Estrutura
 
-- `src/Shine.Api`: composição HTTP e endpoints da API.
-- `src/Shine.Application`: casos de uso e contratos da aplicação.
-- `src/Shine.Domain`: regras e abstrações de domínio.
-- `src/Shine.Infrastructure`: integrações e implementações técnicas.
-- `src/Shine.Shared`: tipos compartilhados entre camadas.
+- `host/Shine.Api`: composição HTTP e endpoints da API.
+- `platform/Core`: identidade, autorização, clientes e capacidades centrais atuais.
+- `platform/Shared`: tipos compartilhados mínimos entre plataforma e módulos.
+- `modules/Billing`: domínio, aplicação, infraestrutura e testes de Billing.
+- `modules/Scheduling`: domínio, aplicação, infraestrutura e testes de Agenda.
+- `tests/Shine.TestKit`: infraestrutura reutilizável para testes de integração.
+- `tests/Shine.ArchitectureTests`: limites automatizados entre módulos e camadas.
+
+As regras completas estão em [`docs/architecture.md`](docs/architecture.md).
 
 Nenhum módulo funcional foi criado nesta etapa.
 
@@ -17,8 +21,8 @@ Nenhum módulo funcional foi criado nesta etapa.
 ```bash
 docker compose up -d
 export ConnectionStrings__ShineDb='Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
-dotnet ef database update --project src/Shine.Infrastructure --startup-project src/Shine.Api
-dotnet run --project src/Shine.Api
+dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
+dotnet run --project host/Shine.Api
 ```
 
 ## Executar a imagem da API

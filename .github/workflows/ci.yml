@@ -48,11 +48,8 @@ jobs:
       - name: Build
         run: dotnet build Shine.Backend.slnx --no-restore --configuration Release
 
-      - name: Unit tests
-        run: dotnet test tests/Shine.UnitTests/Shine.UnitTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
-
-      - name: Integration tests
-        run: dotnet test tests/Shine.IntegrationTests/Shine.IntegrationTests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+      - name: Parallel isolated regression suite
+        run: dotnet test Shine.Backend.slnx --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
 
       - name: Build API container image
         run: docker build --tag shine-backend:ci .

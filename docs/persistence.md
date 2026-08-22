@@ -9,8 +9,8 @@ O ambiente local usa PostgreSQL via `docker compose up -d postgres`, com banco `
 As migrations são geradas e aplicadas pelo EF Core:
 
 ```bash
-dotnet ef migrations add InitialPersistence --project src/Shine.Infrastructure --startup-project src/Shine.Api --output-dir Persistence/Migrations
-dotnet ef database update --project src/Shine.Infrastructure --startup-project src/Shine.Api
+dotnet ef migrations add InitialPersistence --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api --output-dir Persistence/Migrations
+dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
 ```
 
 ## Seed
