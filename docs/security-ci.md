@@ -5,7 +5,7 @@ The `Backend Security` workflow runs on pull requests and pushes to `main`, and 
 ## Required checks
 
 - **CodeQL (C#):** performs semantic static analysis with the `security-and-quality` query suite. Findings are published to GitHub code scanning.
-- **Gitleaks:** scans Git history with the upstream default rules. Output is redacted by the action and PR comments/artifact uploads are disabled so detected values are not copied to secondary locations.
+- **Gitleaks:** downloads the pinned open-source CLI release, verifies its published SHA-256 checksum, and scans the complete Git history with the upstream default rules. Output is redacted so detected values are not copied to secondary locations.
 - **NuGet audit:** evaluates direct and transitive dependencies. Low and Moderate advisories create warnings; High and Critical advisories fail the job. Failure to obtain or parse advisory data also fails the job.
 
 Branch protection should require both `CodeQL (C#)` and `Dependencies and secrets` before merging.
@@ -24,7 +24,7 @@ Expired exceptions must be removed or renewed through a new review. Broad path e
 
 | Scope | Owner | Justification | Jira | Expires |
 | --- | --- | --- | --- | --- |
-| No active exceptions | — | — | — | — |
+| Gitleaks fingerprint `c9c108f4a822b6f39030893aa82197b61d942cf5:.github/workflows/ci.yml:generic-api-key:31` | Thayrone Lião da Silva | Historical CI-only placeholder; exact fingerprint suppression while permanent removal is tracked. | DEV-858 | 2026-11-19 |
 
 For a confirmed Gitleaks false positive, add only its exact fingerprint to `.gitleaksignore` and add the corresponding row above. Do not place the detected value in documentation, commit messages, logs, or Jira.
 
