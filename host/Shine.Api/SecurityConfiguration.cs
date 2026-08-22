@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
@@ -36,6 +37,16 @@ public sealed class ApiCorsOptions
     public bool AllowCredentials { get; init; }
 }
 
+public sealed class TrustedProxyOptions
+{
+    public string[] KnownProxies { get; init; } = [];
+    public string[] KnownNetworks { get; init; } = [];
+
+    public bool IsValid() =>
+        KnownProxies.All(value => IPAddress.TryParse(value, out _)) &&
+        KnownNetworks.All(value => System.Net.IPNetwork.TryParse(value, out _));
+}
+
 public static class SecurityConfiguration
 {
     public const string CorsPolicy = "Frontend";
@@ -50,9 +61,38 @@ public static class SecurityConfiguration
             .Validate(options => options.IsValid(), "Authentication rate limits must have a positive permit limit and window.")
             .ValidateOnStart();
 
+        services.AddOptions<TrustedProxyOptions>()
+            .Bind(configuration.GetSection("TrustedProxies"))
+            .Validate(options => options.IsValid(),
+                "TrustedProxies entries must be valid IP addresses or CIDR networks.")
+            .ValidateOnStart();
+        var trustedProxies = configuration.GetSection("TrustedProxies").Get<TrustedProxyOptions>() ?? new();
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.ForwardLimit = 1;
+            options.KnownProxies.Clear();
+            options.KnownIPNetworks.Clear();
+            if (trustedProxies.KnownProxies.Length == 0 && trustedProxies.KnownNetworks.Length == 0)
+            {
+                // Empty trust collections mean "trust every proxy" to ForwardedHeadersMiddleware.
+                // Unroutable sentinels make the secure default explicitly trust none.
+                options.KnownProxies.Add(IPAddress.None);
+                options.KnownProxies.Add(IPAddress.IPv6None);
+            }
+            foreach (var proxy in trustedProxies.KnownProxies)
+                options.KnownProxies.Add(IPAddress.Parse(proxy));
+            foreach (var network in trustedProxies.KnownNetworks)
+                options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
+        });
+
         var rateLimits = configuration.GetSection("AuthenticationRateLimiting").Get<AuthenticationRateLimitingOptions>() ?? new();
         services.AddRateLimiter(options =>
         {
+            options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+                TryGetAuthenticationLimit(context, rateLimits, out var policyName, out var limit)
+                    ? FixedWindowPartition($"{policyName}:ip:{ClientAddress(context)}", limit)
+                    : RateLimitPartition.GetNoLimiter("non-authentication"));
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Login, rateLimits.Login);
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Registration, rateLimits.Registration);
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Refresh, rateLimits.Refresh);
@@ -79,15 +119,41 @@ public static class SecurityConfiguration
     }
 
     private static void AddFixedWindowPolicy(RateLimiterOptions options, string policyName, EndpointRateLimitOptions limit) =>
-        options.AddPolicy(policyName, context => RateLimitPartition.GetFixedWindowLimiter(
-            $"{policyName}:{ClientAddress(context)}",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = limit.PermitLimit,
-                Window = limit.Window,
-                QueueLimit = 0,
-                AutoReplenishment = true
-            }));
+        options.AddPolicy(policyName, context =>
+        {
+            var identity = AuthenticationRateLimitIdentityMiddleware.GetPartitionIdentity(context);
+            var partition = identity == "anonymous"
+                ? $"{policyName}:anonymous:{ClientAddress(context)}"
+                : $"{policyName}:identity:{identity}";
+            return FixedWindowPartition(partition, limit);
+        });
+
+    private static RateLimitPartition<string> FixedWindowPartition(string partition, EndpointRateLimitOptions limit) =>
+        RateLimitPartition.GetFixedWindowLimiter(partition, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = limit.PermitLimit,
+            Window = limit.Window,
+            QueueLimit = 0,
+            AutoReplenishment = true
+        });
+
+    private static bool TryGetAuthenticationLimit(
+        HttpContext context,
+        AuthenticationRateLimitingOptions limits,
+        out string policyName,
+        out EndpointRateLimitOptions limit)
+    {
+        policyName = context.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName ?? string.Empty;
+        limit = policyName switch
+        {
+            AuthenticationRateLimitPolicies.Login => limits.Login,
+            AuthenticationRateLimitPolicies.Registration => limits.Registration,
+            AuthenticationRateLimitPolicies.Refresh => limits.Refresh,
+            AuthenticationRateLimitPolicies.PasswordRecovery => limits.PasswordRecovery,
+            _ => null!
+        };
+        return limit is not null;
+    }
 
     private static string ClientAddress(HttpContext context) =>
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown";

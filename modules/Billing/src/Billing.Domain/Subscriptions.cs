@@ -57,6 +57,9 @@ public sealed class Subscription : BaseEntity<Guid>
 
     public Guid AccountId { get; private set; }
     public Guid PlanId { get; private set; }
+    public string? CheckoutIdempotencyKey { get; private set; }
+    public string? ProviderCode { get; private set; }
+    public string? ExternalSubscriptionId { get; private set; }
     public Guid? PendingPlanId { get; private set; }
     public DateTime? PendingPlanEffectiveAtUtc { get; private set; }
     public BillingInterval Interval { get; private set; }
@@ -68,6 +71,24 @@ public sealed class Subscription : BaseEntity<Guid>
     public DateTime CreatedAtUtc { get; private set; }
     public IReadOnlyCollection<SubscriptionUnit> Units => units.AsReadOnly();
     public IReadOnlySet<Guid> UnitIds => units.Select(x => x.UnitId).ToHashSet();
+
+    public void PrepareCheckout(string providerCode, string idempotencyKey)
+    {
+        if (Status != SubscriptionStatus.Draft) throw new DomainException("Only a draft subscription can start checkout.");
+        ProviderCode = RequireText(providerCode, "Provider", 80).ToUpperInvariant();
+        CheckoutIdempotencyKey = RequireText(idempotencyKey, "Idempotency key", 120);
+    }
+
+    public void AttachExternalSubscription(string providerCode, string externalSubscriptionId)
+    {
+        if (Status != SubscriptionStatus.Draft) throw new DomainException("Only a draft subscription can receive checkout data.");
+        var normalizedProvider = RequireText(providerCode, "Provider", 80).ToUpperInvariant();
+        var normalizedExternalId = RequireText(externalSubscriptionId, "External subscription", 200);
+        if (ProviderCode != normalizedProvider) throw new DomainException("The checkout provider does not match the subscription.");
+        if (ExternalSubscriptionId is not null && ExternalSubscriptionId != normalizedExternalId)
+            throw new DomainException("The checkout returned a conflicting external subscription.");
+        ExternalSubscriptionId = normalizedExternalId;
+    }
 
     public void AddUnit(Guid unitId)
     {
@@ -162,6 +183,10 @@ public sealed class Subscription : BaseEntity<Guid>
     }
 
     private string CorrelationId() => $"subscription:{Id:N}";
+    private static string RequireText(string value, string name, int maximumLength) =>
+        string.IsNullOrWhiteSpace(value) || value.Trim().Length > maximumLength
+            ? throw new DomainException($"{name} is invalid.")
+            : value.Trim();
 }
 
 public sealed class SubscriptionUnit

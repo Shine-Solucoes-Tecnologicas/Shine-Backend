@@ -19,26 +19,52 @@ public sealed class PasswordHashServiceTests
     }
 
     [Fact]
-    public void Missing_user_verification_uses_a_comparable_pbkdf2_cost()
+    public void Missing_user_verification_stays_within_the_documented_median_timing_tolerance()
     {
         var encoded = service.Hash("Strong.Password1!");
-        service.Verify("warmup", encoded);
-        service.Verify("warmup", null);
+        for (var index = 0; index < 2; index++)
+        {
+            service.Verify("warmup", encoded);
+            service.Verify("warmup", null);
+        }
 
-        var knownDuration = Measure(() => service.Verify("wrong", encoded), 3);
-        var missingDuration = Measure(() => service.Verify("wrong", null), 3);
-        var ratio = missingDuration.TotalMilliseconds / knownDuration.TotalMilliseconds;
+        var knownSamples = new List<double>();
+        var missingSamples = new List<double>();
+        for (var index = 0; index < 9; index++)
+        {
+            // Alternate order to reduce systematic CPU-frequency and runner-load bias.
+            if (index % 2 == 0)
+            {
+                knownSamples.Add(Measure(() => service.Verify("wrong", encoded)).TotalMilliseconds);
+                missingSamples.Add(Measure(() => service.Verify("wrong", null)).TotalMilliseconds);
+            }
+            else
+            {
+                missingSamples.Add(Measure(() => service.Verify("wrong", null)).TotalMilliseconds);
+                knownSamples.Add(Measure(() => service.Verify("wrong", encoded)).TotalMilliseconds);
+            }
+        }
 
-        // Timing varies on shared CI runners; this broad bound catches a fast-path regression
-        // while avoiding an unrealistic equality requirement between measurements.
-        Assert.InRange(ratio, 0.25, 4.0);
+        var knownMedian = Median(knownSamples);
+        var missingMedian = Median(missingSamples);
+        var relativeDifference = Math.Abs(missingMedian - knownMedian) / knownMedian;
+
+        // See docs/security/password-verification-timing.md. A 40% median tolerance absorbs
+        // shared-runner jitter while still rejecting the former no-PBKDF2 fast path.
+        Assert.InRange(relativeDifference, 0, 0.40);
     }
 
-    private static TimeSpan Measure(Action action, int repetitions)
+    private static TimeSpan Measure(Action action)
     {
         var stopwatch = Stopwatch.StartNew();
-        for (var index = 0; index < repetitions; index++) action();
+        action();
         stopwatch.Stop();
         return stopwatch.Elapsed;
+    }
+
+    private static double Median(IEnumerable<double> samples)
+    {
+        var ordered = samples.Order().ToArray();
+        return ordered[ordered.Length / 2];
     }
 }

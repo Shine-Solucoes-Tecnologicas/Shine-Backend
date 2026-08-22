@@ -3,6 +3,7 @@ using System;
 using Billing.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Billing.Infrastructure.Migrations
 {
     [DbContext(typeof(BillingDbContext))]
-    partial class BillingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821203516_AddFinancialLedger")]
+    partial class AddFinancialLedger
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -419,10 +422,6 @@ namespace Billing.Infrastructure.Migrations
                     b.Property<DateTime?>("CancellationEffectiveAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("CheckoutIdempotencyKey")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -431,10 +430,6 @@ namespace Billing.Infrastructure.Migrations
 
                     b.Property<DateTime?>("CurrentPeriodStartsAtUtc")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExternalSubscriptionId")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
 
                     b.Property<string>("Interval")
                         .IsRequired()
@@ -450,24 +445,12 @@ namespace Billing.Infrastructure.Migrations
                     b.Property<Guid>("PlanId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ProviderCode")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
-
-                    b.HasIndex("AccountId", "CheckoutIdempotencyKey")
-                        .IsUnique()
-                        .HasFilter("\"CheckoutIdempotencyKey\" IS NOT NULL");
-
-                    b.HasIndex("ProviderCode", "ExternalSubscriptionId")
-                        .IsUnique()
-                        .HasFilter("\"ExternalSubscriptionId\" IS NOT NULL");
 
                     b.ToTable("BillingSubscriptions", (string)null);
                 });

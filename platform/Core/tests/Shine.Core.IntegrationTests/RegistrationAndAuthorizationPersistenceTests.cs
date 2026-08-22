@@ -91,7 +91,8 @@ public sealed class RegistrationAndAuthorizationPersistenceTests(DatabaseFixture
         var account = new CustomerAccount($"Account {Guid.NewGuid():N}");
         var tenant = new Tenant($"Unit {Guid.NewGuid():N}");
         tenant.AssignToCustomerAccount(account.Id);
-        db.AddRange(user, account, tenant, new CustomerAccountUser(account.Id, user.Id));
+        db.AddRange(user, account, tenant, new UserTenant(user.Id, tenant.Id, user.Id, false),
+            new CustomerAccountUser(account.Id, user.Id));
         await db.SaveChangesAsync();
         await AuthorizationSeed.SeedCustomerAccountDefaultsAsync(db, account.Id, user.Id);
 
@@ -107,5 +108,27 @@ public sealed class RegistrationAndAuthorizationPersistenceTests(DatabaseFixture
         await db.SaveChangesAsync();
 
         Assert.True(await authorization.HasPermissionAsync(user.Id, tenant.Id, "scheduling.read"));
+    }
+
+    [Fact]
+    public async Task Inactive_unit_membership_revokes_customer_account_permissions_immediately()
+    {
+        await using var db = fixture.CreateDb();
+        var user = new User($"revoked-{Guid.NewGuid():N}@example.test", "hash");
+        var account = new CustomerAccount($"Revoked account {Guid.NewGuid():N}");
+        var tenant = new Tenant($"Revoked unit {Guid.NewGuid():N}");
+        tenant.AssignToCustomerAccount(account.Id);
+        var membership = new UserTenant(user.Id, tenant.Id, user.Id, false);
+        db.AddRange(user, account, tenant, membership, new CustomerAccountUser(account.Id, user.Id));
+        await db.SaveChangesAsync();
+        await AuthorizationSeed.SeedCustomerAccountDefaultsAsync(db, account.Id, user.Id);
+
+        var authorization = new PermissionAuthorization(db, new CustomerAccountAuthorization(db));
+        Assert.True(await authorization.HasPermissionAsync(user.Id, tenant.Id, "billing.read"));
+
+        membership.Deactivate();
+        await db.SaveChangesAsync();
+
+        Assert.False(await authorization.HasPermissionAsync(user.Id, tenant.Id, "billing.read"));
     }
 }

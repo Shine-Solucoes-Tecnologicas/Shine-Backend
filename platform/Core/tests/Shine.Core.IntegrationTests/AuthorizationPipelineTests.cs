@@ -50,6 +50,32 @@ public sealed class AuthorizationPipelineTests(DatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task Administrative_dashboard_executes_the_real_global_authorization_pipeline()
+    {
+        await using var db = fixture.CreateDb();
+        await AuthorizationSeed.EnsureGlobalRolesAsync(db);
+        var regularUser = new User($"dashboard-regular-{Guid.NewGuid():N}@example.test", "hash");
+        var platformAdministrator = new User($"dashboard-admin-{Guid.NewGuid():N}@example.test", "hash");
+        var administratorRole = await db.GlobalRoles.SingleAsync(x => x.Name == GlobalRole.PlatformAdminName);
+        db.Users.AddRange(regularUser, platformAdministrator);
+        db.UserGlobalRoles.Add(new UserGlobalRole(platformAdministrator.Id, administratorRole.Id));
+        await db.SaveChangesAsync();
+
+        await using var factory = new ApiFactory(ConnectionString(), JwtSecret);
+        using var client = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/admin/dashboard/summary")).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = Bearer(regularUser.Id);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.GetAsync("/api/admin/dashboard/summary")).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = Bearer(platformAdministrator.Id);
+        var authorized = await client.GetAsync("/api/admin/dashboard/summary");
+        Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
+    }
+
+    [Fact]
     public async Task Reschedule_requires_scheduling_management_instead_of_generic_administration()
     {
         await using var db = fixture.CreateDb();
@@ -109,8 +135,7 @@ public sealed class AuthorizationPipelineTests(DatabaseFixture fixture)
         return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, Array.Empty<string>()).Token);
     }
 
-    private static string ConnectionString() => Environment.GetEnvironmentVariable("ConnectionStrings__ShineDb")
-        ?? "Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine";
+    private string ConnectionString() => fixture.ConnectionString;
 
     private sealed class ApiFactory(string connectionString, string jwtSecret) : WebApplicationFactory<Program>
     {

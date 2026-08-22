@@ -17,6 +17,8 @@ public static class DependencyInjection
         services.AddScoped<ISubscriptionPlanCatalog, SubscriptionPlanCatalog>();
         services.AddScoped<SubscriptionActivationService>();
         services.AddScoped<SubscriptionPlanChangeService>();
+        services.AddScoped<IFinancialRecordRepository, FinancialRecordRepository>();
+        services.AddScoped<FinancialLedgerService>();
         services.AddSingleton<IBillingClock, SystemBillingClock>();
         services.AddScoped<BillingWebhookProcessor>();
         services.AddScoped<BillingOutboxProcessor>();

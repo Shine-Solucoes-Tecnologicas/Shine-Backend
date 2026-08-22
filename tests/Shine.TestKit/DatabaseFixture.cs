@@ -5,6 +5,7 @@ using Shine.Infrastructure;
 using Billing.Infrastructure;
 using Scheduling.Infrastructure;
 using Xunit;
+using Npgsql;
 
 namespace Shine.IntegrationTests;
 
@@ -12,11 +13,23 @@ public sealed class DatabaseFixture : IAsyncLifetime
 {
     public ShineDbContext Db { get; private set; } = null!;
     private string connectionString = null!;
+    private string baseConnectionString = null!;
+    private string schemaName = null!;
+    public string ConnectionString => connectionString;
 
     public async Task InitializeAsync()
     {
-        connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ShineDb")
+        baseConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ShineDb")
             ?? "Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine";
+        schemaName = CreateSchemaName();
+        await using (var connection = new NpgsqlConnection(baseConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"CREATE SCHEMA \"{schemaName}\"";
+            await command.ExecuteNonQueryAsync();
+        }
+        connectionString = new NpgsqlConnectionStringBuilder(baseConnectionString) { SearchPath = schemaName }.ConnectionString;
         var options = new DbContextOptionsBuilder<ShineDbContext>()
             .UseNpgsql(connectionString)
             .Options;
@@ -28,7 +41,25 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await schedulingDb.Database.MigrateAsync();
     }
 
-    public async Task DisposeAsync() => await Db.DisposeAsync();
+    public async Task DisposeAsync()
+    {
+        await Db.DisposeAsync();
+        await using var connection = new NpgsqlConnection(baseConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DROP SCHEMA IF EXISTS \"{schemaName}\" CASCADE";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static string CreateSchemaName()
+    {
+        var assembly = AppDomain.CurrentDomain.GetAssemblies().Select(x => x.GetName().Name)
+            .FirstOrDefault(x => x?.EndsWith(".IntegrationTests", StringComparison.Ordinal) == true)
+            ?? "integration";
+        var normalized = new string(assembly.ToLowerInvariant().Where(char.IsLetterOrDigit).Take(20).ToArray());
+        var candidate = $"test_{normalized}_{Environment.ProcessId}_{Guid.NewGuid():N}";
+        return candidate[..Math.Min(63, candidate.Length)];
+    }
     public ShineDbContext CreateDb(ICurrentTenant? currentTenant = null, ITenantExecutionContext? tenantExecutionContext = null)
     {
         var effectiveExecutionContext = tenantExecutionContext ?? (currentTenant is null ? new TestBypassContext() : null);

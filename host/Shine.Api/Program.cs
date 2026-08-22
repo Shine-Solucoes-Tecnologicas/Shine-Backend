@@ -54,9 +54,12 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseMiddleware<NullRemoteForwardedHeadersGuardMiddleware>();
+app.UseForwardedHeaders();
 app.UseRouting();
 app.UseCors(SecurityConfiguration.CorsPolicy);
 app.UseMiddleware<RequestDiagnosticsMiddleware>();
+app.UseMiddleware<AuthenticationRateLimitIdentityMiddleware>();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

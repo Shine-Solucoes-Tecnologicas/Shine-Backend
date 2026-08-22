@@ -15,6 +15,11 @@ public sealed class PermissionAuthorization(ShineDbContext db, ICustomerAccountA
     public async Task<bool> HasPermissionAsync(Guid userId, Guid tenantId, string permissionCode, CancellationToken cancellationToken = default)
     {
         if (await IsPlatformOperatorAsync(userId, cancellationToken)) return false;
+        var hasActiveTenantMembership = await db.UserTenants.AsNoTracking().AnyAsync(link =>
+            link.UserId == userId && link.TenantId == tenantId && link.IsActive && link.Tenant.IsActive,
+            cancellationToken);
+        if (!hasActiveTenantMembership) return false;
+
         var accountId = await db.Tenants.AsNoTracking()
             .Where(tenant => tenant.Id == tenantId)
             .Select(tenant => tenant.CustomerAccountId)

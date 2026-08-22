@@ -138,12 +138,15 @@ public sealed class ShineDbContext(
                 .Where(value => value is not null)
                 .ToArray();
             var entityId = key is { Length: > 0 } ? string.Join("/", key) : "pending";
-            var values = entry.Properties.ToDictionary(property => property.Metadata.Name, property => MaskSensitive(property.Metadata.Name, property.CurrentValue));
-            var oldValues = entry.State == EntityState.Added ? null : entry.Properties.ToDictionary(property => property.Metadata.Name, property => MaskSensitive(property.Metadata.Name, property.OriginalValue));
+            var entityType = entry.Metadata.ClrType.Name;
+            var values = entry.Properties.ToDictionary(property => property.Metadata.Name,
+                property => MaskSensitive(entityType, property.Metadata.Name, property.CurrentValue));
+            var oldValues = entry.State == EntityState.Added ? null : entry.Properties.ToDictionary(property => property.Metadata.Name,
+                property => MaskSensitive(entityType, property.Metadata.Name, property.OriginalValue));
             var httpContext = httpContextAccessor?.HttpContext;
 
             AuditEntries.Add(AuditEntry.Create(
-                entry.Metadata.ClrType.Name,
+                entityType,
                 entityId,
                 action,
                 userId,
@@ -182,7 +185,7 @@ public sealed class ShineDbContext(
             throw new TenantIsolationException("The entity belongs to another tenant.");
     }
 
-    private static object? MaskSensitive(string propertyName, object? value)
+    private static object? MaskSensitive(string entityType, string propertyName, object? value)
     {
         if (value is null) return null;
 
@@ -194,9 +197,28 @@ public sealed class ShineDbContext(
             || propertyName.Contains("email", StringComparison.OrdinalIgnoreCase)
             || propertyName.Contains("phone", StringComparison.OrdinalIgnoreCase)
             || propertyName.Contains("taxidentifier", StringComparison.OrdinalIgnoreCase)
-            || propertyName.Contains("document", StringComparison.OrdinalIgnoreCase);
+            || propertyName.Contains("document", StringComparison.OrdinalIgnoreCase)
+            || entityType == nameof(Customer) && propertyName is nameof(Customer.Name) or nameof(Customer.NormalizedName);
 
-        return sensitive ? "[MASKED]" : value;
+        return sensitive || value is string text && ContainsSensitiveValue(text) ? "[MASKED]" : value;
+    }
+
+    private static bool ContainsSensitiveValue(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var normalized = new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        var credentialMarkers = new[]
+        {
+            "password", "secret", "credential", "privatekey", "connectionstring",
+            "accesstoken", "refreshtoken", "cardtoken", "paymenttoken", "cardnumber", "cvv", "cvc"
+        };
+        if (credentialMarkers.Any(normalized.Contains)) return true;
+
+        var at = value.IndexOf('@');
+        if (at > 0 && at < value.Length - 3 && value[(at + 1)..].Contains('.')) return true;
+
+        return value.Count(char.IsDigit) >= 10;
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
