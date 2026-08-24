@@ -24,7 +24,7 @@ Expired exceptions must be removed or renewed through a new review. Broad path e
 
 | Scope | Owner | Justification | Jira | Expires |
 | --- | --- | --- | --- | --- |
-| Gitleaks fingerprint `c9c108f4a822b6f39030893aa82197b61d942cf5:.github/workflows/ci.yml:generic-api-key:31` | Thayrone Lião da Silva | Historical CI-only placeholder; exact fingerprint suppression while permanent removal is tracked. | DEV-858 | 2026-11-19 |
+No security exceptions are currently active.
 
 For a confirmed Gitleaks false positive, add only its exact fingerprint to `.gitleaksignore` and add the corresponding row above. Do not place the detected value in documentation, commit messages, logs, or Jira.
 

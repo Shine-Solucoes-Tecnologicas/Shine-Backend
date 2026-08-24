@@ -1,3 +1,0 @@
-# Exact Gitleaks fingerprints only. Each entry requires a matching, unexpired
-# exception recorded in docs/security-ci.md.
-c9c108f4a822b6f39030893aa82197b61d942cf5:.github/workflows/ci.yml:generic-api-key:31
