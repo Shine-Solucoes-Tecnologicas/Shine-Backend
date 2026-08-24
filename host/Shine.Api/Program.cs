@@ -32,6 +32,17 @@ builder.Services.AddRateLimiter(options => options.AddPolicy("public-scheduling"
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddShineJwtAuthentication();
 builder.Services.AddSingleton<IPasswordRecoveryMessageTemplate, PasswordRecoveryMessageTemplate>();
+builder.Services.AddSingleton<IEmailVerificationMessageTemplate, EmailVerificationMessageTemplate>();
+builder.Services.AddScoped<EmailVerificationChallengeService>();
+builder.Services.AddOptions<EmailVerificationOptions>()
+    .Bind(builder.Configuration.GetSection("EmailVerification"))
+    .Validate(options => options.TokenLifetimeMinutes is > 0 and <= 1440,
+        "EmailVerification:TokenLifetimeMinutes must be between 1 and 1440.")
+    .ValidateOnStart();
+if (builder.Configuration.GetValue<bool>("EmailVerification:MockDelivery"))
+    builder.Services.AddSingleton<IEmailVerificationDelivery, InMemoryEmailVerificationDelivery>();
+else
+    builder.Services.AddSingleton<IEmailVerificationDelivery, NullEmailVerificationDelivery>();
 if (builder.Configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
     builder.Services.AddSingleton<IPasswordRecoveryDelivery, InMemoryPasswordRecoveryDelivery>();
 else

@@ -23,6 +23,7 @@ Toda exceção à política precisa registrar responsável, justificativa, escop
 - `Jwt__ActiveKeyId` identifica uma entrada de `Jwt__SigningKeys`; `Jwt__Secret` não é usado.
 - RabbitMQ, quando habilitado, possui usuário dedicado e senha não padrão.
 - `PasswordRecovery__MockDelivery=false`.
+- `EmailVerification__MockDelivery=false` e o adaptador do provedor transacional está registrado.
 - CORS contém apenas as origens HTTPS esperadas.
 - Logs e artefatos de CI não contêm valores de configuração sensíveis.
 - O responsável pela implantação confirmou plano e responsáveis de rotação.

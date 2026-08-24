@@ -19,6 +19,8 @@ public static class ProductionConfigurationValidation
         ValidateRabbitMq(configuration.GetSection("RabbitMq").Get<RabbitMqOptions>() ?? new RabbitMqOptions());
         if (configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
             Fail("PasswordRecovery:MockDelivery must be disabled in Production.");
+        if (configuration.GetValue<bool>("EmailVerification:MockDelivery"))
+            Fail("EmailVerification:MockDelivery must be disabled in Production.");
     }
 
     private static void ValidateDatabase(string? connectionString)

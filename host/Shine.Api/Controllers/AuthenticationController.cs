@@ -114,9 +114,9 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
 
         var now = DateTime.UtcNow;
         var passwordIsValid = passwordHashService.Verify(request.Password, user?.PasswordHash);
-        if (user is null || !user.IsActive || user.IsLoginLocked(now) || !passwordIsValid)
+        if (user is null || !user.IsActive || !user.IsEmailVerified || user.IsLoginLocked(now) || !passwordIsValid)
         {
-            if (user is not null && user.IsActive && !user.IsLoginLocked(now))
+            if (user is not null && user.IsActive && user.IsEmailVerified && !user.IsLoginLocked(now))
                 user.RegisterFailedLogin(now, loginSecurity.Value.MaxFailedAttempts, TimeSpan.FromMinutes(loginSecurity.Value.LockoutMinutes));
             await dbContext.SaveChangesAsync(cancellationToken);
             return Unauthorized();
@@ -165,7 +165,7 @@ public sealed class AuthenticationController(ShineDbContext dbContext, IPassword
             """).SingleOrDefaultAsync(cancellationToken);
         if (current is null || !current.IsActive(DateTime.UtcNow)) return Unauthorized();
         var user = await dbContext.Users.SingleOrDefaultAsync(x => x.Id == current.UserId, cancellationToken);
-        if (user is null || !user.IsActive) return Unauthorized();
+        if (user is null || !user.IsActive || !user.IsEmailVerified) return Unauthorized();
         if (current.TenantId is Guid refreshTenantId && !await dbContext.Tenants.AnyAsync(tenant => tenant.Id == refreshTenantId && tenant.IsActive, cancellationToken))
             return Unauthorized();
 

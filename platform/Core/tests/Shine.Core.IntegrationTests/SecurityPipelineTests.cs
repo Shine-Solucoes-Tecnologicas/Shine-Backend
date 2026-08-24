@@ -190,7 +190,11 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
             ["AuthenticationRateLimiting:Refresh:PermitLimit"] = "1",
             ["AuthenticationRateLimiting:Refresh:Window"] = "00:01:00",
             ["AuthenticationRateLimiting:PasswordRecovery:PermitLimit"] = "1",
-            ["AuthenticationRateLimiting:PasswordRecovery:Window"] = "00:01:00"
+            ["AuthenticationRateLimiting:PasswordRecovery:Window"] = "00:01:00",
+            ["AuthenticationRateLimiting:EmailVerificationResend:PermitLimit"] = "1",
+            ["AuthenticationRateLimiting:EmailVerificationResend:Window"] = "00:01:00",
+            ["AuthenticationRateLimiting:EmailVerificationConfirm:PermitLimit"] = "1",
+            ["AuthenticationRateLimiting:EmailVerificationConfirm:Window"] = "00:01:00"
         });
         using var client = factory.CreateClient();
 
@@ -199,7 +203,9 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
             ("/api/auth/login", new LoginRequest("", ""), HttpStatusCode.Unauthorized),
             ("/api/auth/register", new RegistrationRequest("", "", ""), HttpStatusCode.BadRequest),
             ("/api/auth/refresh", new RefreshRequest("invalid"), HttpStatusCode.Unauthorized),
-            ("/api/auth/password/recovery", new PasswordRecoveryRequest(""), HttpStatusCode.Accepted)
+            ("/api/auth/password/recovery", new PasswordRecoveryRequest(""), HttpStatusCode.Accepted),
+            ("/api/auth/email-verification/resend", new EmailVerificationResendRequest(""), HttpStatusCode.Accepted),
+            ("/api/auth/email-verification/confirm", new EmailVerificationConfirmRequest("invalid"), HttpStatusCode.BadRequest)
         };
 
         foreach (var request in requests)
@@ -207,6 +213,30 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
             Assert.Equal(request.FirstStatus, (await client.PostAsJsonAsync(request.Path, request.Body)).StatusCode);
             Assert.Equal(HttpStatusCode.TooManyRequests, (await client.PostAsJsonAsync(request.Path, request.Body)).StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task Unverified_user_cannot_login_even_with_the_correct_password()
+    {
+        const string password = "Strong-password-123!";
+        var user = new User(
+            $"pending-{Guid.NewGuid():N}@example.test",
+            new Pbkdf2PasswordHashService().Hash(password),
+            emailVerified: false);
+        await using (var db = fixture.CreateDb())
+        {
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+        }
+
+        await using var factory = new ApiFactory(ConnectionString());
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest(user.Email, password));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        await using var verificationDb = fixture.CreateDb();
+        Assert.False(await verificationDb.RefreshTokens.AnyAsync(token => token.UserId == user.Id));
     }
 
     [Fact]

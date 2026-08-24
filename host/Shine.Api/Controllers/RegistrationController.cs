@@ -5,7 +5,6 @@ using Shine.Domain.Identity;
 using Shine.Infrastructure;
 using Shine.Infrastructure.Persistence;
 using Shine.Infrastructure.Persistence.Seed;
-using Microsoft.Extensions.Options;
 using Shine.Domain;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -18,20 +17,26 @@ public sealed class RegistrationController(
     ShineDbContext dbContext,
     IPasswordHashService passwordHashService,
     IPasswordPolicy passwordPolicy,
-    IAccessTokenService accessTokenService,
-    IOptions<JwtOptions> jwtOptions) : ControllerBase
+    EmailVerificationChallengeService emailVerification) : ControllerBase
 {
     [HttpPost("register")]
     [EnableRateLimiting(AuthenticationRateLimitPolicies.Registration)]
-    public async Task<ActionResult<RegistrationResponse>> Register(RegistrationRequest request, CancellationToken cancellationToken)
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> Register(RegistrationRequest request, CancellationToken cancellationToken)
     {
         if (!passwordPolicy.IsValid(request.Password, out _)) return BadRequest();
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.TenantName)) return BadRequest();
         var normalizedEmail = Shine.Domain.Identity.User.NormalizeEmail(request.Email);
-        if (await dbContext.Users.AnyAsync(user => user.NormalizedEmail == normalizedEmail, cancellationToken)) return Conflict();
+        var existing = await dbContext.Users.SingleOrDefaultAsync(
+            user => user.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (existing is not null)
+        {
+            await emailVerification.IssueAsync(existing, cancellationToken);
+            return Accepted();
+        }
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        var user = new User(request.Email, passwordHashService.Hash(request.Password));
+        var user = new User(request.Email, passwordHashService.Hash(request.Password), emailVerified: false);
         var account = new CustomerAccount(request.TenantName);
         var tenant = new Tenant(request.TenantName);
         tenant.AssignToCustomerAccount(account.Id);
@@ -54,15 +59,10 @@ public sealed class RegistrationController(
         }
         dbContext.TenantPlans.Add(new TenantPlan(tenant.Id, defaultPlan.Id));
         await dbContext.SaveChangesAsync(cancellationToken);
-        var roles = await dbContext.UserTenantRoles.Where(link => link.UserId == user.Id && link.TenantId == tenant.Id).Select(link => link.Role.Name).Distinct().ToArrayAsync(cancellationToken);
-        var access = accessTokenService.Create(user.Id, tenant.Id, user.Tenants.Single().UserTenantId, roles);
-        var refresh = RefreshTokenHash.Create();
-        dbContext.RefreshTokens.Add(new RefreshToken(user.Id, tenant.Id, user.Tenants.Single().UserTenantId, refresh.Hash, DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays)));
-        await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return Created("/api/auth/login", new RegistrationResponse(user.Id, tenant.Id, access.Token, access.ExpiresAtUtc, refresh.Raw));
+        await emailVerification.IssueAsync(user, cancellationToken);
+        return Accepted();
     }
 }
 
 public sealed record RegistrationRequest(string Email, string Password, string TenantName);
-public sealed record RegistrationResponse(Guid UserId, Guid TenantId, string AccessToken, DateTime AccessTokenExpiresAtUtc, string RefreshToken);

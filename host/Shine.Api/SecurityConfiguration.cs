@@ -13,6 +13,8 @@ public static class AuthenticationRateLimitPolicies
     public const string Registration = "auth-registration";
     public const string Refresh = "auth-refresh";
     public const string PasswordRecovery = "auth-password-recovery";
+    public const string EmailVerificationResend = "auth-email-verification-resend";
+    public const string EmailVerificationConfirm = "auth-email-verification-confirm";
 }
 
 public sealed class AuthenticationRateLimitingOptions
@@ -21,8 +23,11 @@ public sealed class AuthenticationRateLimitingOptions
     public EndpointRateLimitOptions Registration { get; init; } = new(5, TimeSpan.FromMinutes(5));
     public EndpointRateLimitOptions Refresh { get; init; } = new(30, TimeSpan.FromMinutes(1));
     public EndpointRateLimitOptions PasswordRecovery { get; init; } = new(5, TimeSpan.FromMinutes(15));
+    public EndpointRateLimitOptions EmailVerificationResend { get; init; } = new(5, TimeSpan.FromMinutes(15));
+    public EndpointRateLimitOptions EmailVerificationConfirm { get; init; } = new(10, TimeSpan.FromMinutes(5));
 
-    public bool IsValid() => Login.IsValid() && Registration.IsValid() && Refresh.IsValid() && PasswordRecovery.IsValid();
+    public bool IsValid() => Login.IsValid() && Registration.IsValid() && Refresh.IsValid() && PasswordRecovery.IsValid() &&
+        EmailVerificationResend.IsValid() && EmailVerificationConfirm.IsValid();
 }
 
 public sealed record EndpointRateLimitOptions(int PermitLimit, TimeSpan Window)
@@ -97,6 +102,8 @@ public static class SecurityConfiguration
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Registration, rateLimits.Registration);
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Refresh, rateLimits.Refresh);
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.PasswordRecovery, rateLimits.PasswordRecovery);
+            AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.EmailVerificationResend, rateLimits.EmailVerificationResend);
+            AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.EmailVerificationConfirm, rateLimits.EmailVerificationConfirm);
             options.OnRejected = WriteRateLimitResponseAsync;
         });
 
@@ -150,6 +157,8 @@ public static class SecurityConfiguration
             AuthenticationRateLimitPolicies.Registration => limits.Registration,
             AuthenticationRateLimitPolicies.Refresh => limits.Refresh,
             AuthenticationRateLimitPolicies.PasswordRecovery => limits.PasswordRecovery,
+            AuthenticationRateLimitPolicies.EmailVerificationResend => limits.EmailVerificationResend,
+            AuthenticationRateLimitPolicies.EmailVerificationConfirm => limits.EmailVerificationConfirm,
             _ => null!
         };
         return limit is not null;

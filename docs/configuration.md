@@ -30,6 +30,25 @@ Quando `PasswordRecovery__MockDelivery=true`, a mensagem de recuperação é ent
 
 Os logs registram apenas que uma entrega foi preparada para o endereço informado. Token, URL e corpo da mensagem são sempre omitidos. O armazenamento em memória é descartado ao reiniciar a aplicação e não deve ser habilitado em produção.
 
+## Verificação de e-mail
+
+O cadastro cria a conta do cliente e sua primeira unidade, mas responde com `202 Accepted` sem emitir access token ou refresh token. O usuário não consegue autenticar até consumir um desafio de verificação.
+
+```text
+EmailVerification__BaseUrl=https://app.example.com
+EmailVerification__TokenLifetimeMinutes=30
+EmailVerification__MockDelivery=false
+```
+
+Os endpoints públicos são:
+
+* `POST /api/auth/email-verification/resend`, que sempre responde `202` para não revelar se o endereço está cadastrado;
+* `POST /api/auth/email-verification/confirm`, que consome atomicamente um token de uso único.
+
+Tokens brutos existem somente durante a composição da mensagem. O banco armazena SHA-256, e os logs registram apenas o identificador interno do usuário. Reenvio invalida desafios anteriores. Em Development, `MockDelivery=true` mantém a mensagem somente em memória; Production exige que o mock esteja desabilitado e que uma implementação externa de `IEmailVerificationDelivery` seja conectada ao provedor transacional escolhido.
+
+Alterar o endereço pelo método de domínio remove imediatamente a confirmação. A exposição futura dessa operação por API também deverá revogar ou versionar access tokens já emitidos antes de liberar o endpoint.
+
 ## Rate limiting da autenticação
 
 Login, cadastro, refresh e recuperação de senha possuem limites de janela fixa independentes. Os valores são configurados em `AuthenticationRateLimiting` e podem ser substituídos por ambiente, por exemplo:

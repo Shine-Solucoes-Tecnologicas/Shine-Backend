@@ -52,4 +52,32 @@ public sealed class AuthenticationFlowTests
         Assert.True(user.IsLoginLocked(now));
         Assert.False(user.IsLoginLocked(now.AddMinutes(16)));
     }
+
+    [Fact]
+    public void Registration_can_create_an_unverified_user_and_email_change_requires_verification_again()
+    {
+        var user = new User("pending@example.test", "hash", emailVerified: false);
+        Assert.False(user.IsEmailVerified);
+
+        user.VerifyEmail(DateTime.UtcNow);
+        Assert.True(user.IsEmailVerified);
+
+        user.ChangeEmail("new-address@example.test");
+        Assert.Equal("NEW-ADDRESS@EXAMPLE.TEST", user.NormalizedEmail);
+        Assert.False(user.IsEmailVerified);
+    }
+
+    [Fact]
+    public void Email_verification_token_expires_and_can_only_be_consumed_once()
+    {
+        var now = DateTime.UtcNow;
+        var token = new EmailVerificationToken(Guid.NewGuid(), "hash", now.AddMinutes(30), now);
+
+        Assert.True(token.IsValid(now));
+        token.MarkUsed(now.AddMinutes(1));
+        Assert.False(token.IsValid(now.AddMinutes(1)));
+
+        var expired = new EmailVerificationToken(Guid.NewGuid(), "expired", now.AddSeconds(-1), now.AddHours(-1));
+        Assert.False(expired.IsValid(now));
+    }
 }

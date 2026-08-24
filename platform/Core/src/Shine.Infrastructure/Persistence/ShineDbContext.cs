@@ -18,6 +18,7 @@ public sealed class ShineDbContext(
 {
     private Guid? EffectiveTenantId => tenantExecutionContext?.EffectiveTenantId ?? currentTenant?.TenantId;
     public DbSet<User> Users => Set<User>();
+    public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<CustomerAccount> CustomerAccounts => Set<CustomerAccount>();
@@ -230,6 +231,15 @@ public sealed class ShineDbContext(
             entity.Property(user => user.NormalizedEmail).HasMaxLength(320).IsRequired();
             entity.Property(user => user.PasswordHash).IsRequired();
             entity.HasIndex(user => user.NormalizedEmail).IsUnique();
+        });
+
+        modelBuilder.Entity<EmailVerificationToken>(entity =>
+        {
+            entity.HasKey(token => token.Id);
+            entity.Property(token => token.TokenHash).HasMaxLength(128).IsRequired();
+            entity.HasIndex(token => token.TokenHash).IsUnique();
+            entity.HasIndex(token => new { token.UserId, token.UsedAtUtc });
+            entity.HasOne(token => token.User).WithMany().HasForeignKey(token => token.UserId);
         });
 
         modelBuilder.Entity<PasswordResetToken>(entity =>
