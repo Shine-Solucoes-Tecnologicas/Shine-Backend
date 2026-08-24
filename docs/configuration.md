@@ -41,6 +41,17 @@ AuthenticationRateLimiting__Login__Window=00:01:00
 
 A resposta ao exceder o limite usa HTTP `429`, código funcional `rate_limit_exceeded` e o header `Retry-After`. A partição usa o endereço remoto efetivamente observado pela aplicação. Headers encaminhados pelo cliente não são confiados; quando houver proxy reverso, a habilitação de forwarded headers deve listar explicitamente proxies ou redes confiáveis antes do rate limiter.
 
+## Proxy reverso e HTTPS
+
+Production considera o proxy reverso ou load balancer como ponto de terminação TLS. Configure somente os IPs e CIDRs privados dessa camada:
+
+```text
+TrustedProxies__KnownProxies__0=10.0.0.10
+TrustedProxies__KnownNetworks__0=10.20.0.0/16
+```
+
+Cada requisição aceita no máximo um salto encaminhado. `X-Forwarded-For` e `X-Forwarded-Proto` vindos de qualquer outra origem são ignorados. Depois dessa normalização, a aplicação redireciona HTTP para HTTPS em Production e mantém `/health` sem redirecionamento para probes internos. Consulte `deployment-security.md` para a divisão completa de responsabilidades.
+
 ## CORS
 
 As origens do frontend são configuradas em `Cors:AllowedOrigins`. Cada entrada deve ser uma origem HTTP(S) absoluta, sem caminho e sem wildcard. Produção falha na inicialização se não houver origem configurada ou se uma origem local/loopback for informada.

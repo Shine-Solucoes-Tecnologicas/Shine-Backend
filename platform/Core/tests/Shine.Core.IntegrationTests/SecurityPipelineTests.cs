@@ -179,6 +179,91 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task Api_responses_include_security_headers_without_persisting_hsts_in_development()
+    {
+        await using var factory = new ApiFactory(ConnectionString());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://api.example.test"),
+            AllowAutoRedirect = false
+        });
+
+        var response = await client.GetAsync("/route-that-does-not-exist");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal("DENY", Assert.Single(response.Headers.GetValues("X-Frame-Options")));
+        Assert.Equal("no-referrer", Assert.Single(response.Headers.GetValues("Referrer-Policy")));
+        Assert.False(response.Headers.Contains("Strict-Transport-Security"));
+    }
+
+    [Fact]
+    public async Task Production_redirects_direct_http_but_not_an_https_request_from_a_trusted_proxy()
+    {
+        var proxyAddress = IPAddress.Parse("10.0.0.10");
+        var settings = ProductionTransportSettings(proxyAddress);
+        await using var factory = new ApiFactory(
+            ConnectionString(),
+            settings,
+            environment: Environments.Production,
+            remoteIpAddress: proxyAddress);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://api.example.test"),
+            AllowAutoRedirect = false
+        });
+
+        var directHttp = await client.GetAsync("/route-that-does-not-exist?value=1");
+        Assert.Equal(HttpStatusCode.PermanentRedirect, directHttp.StatusCode);
+        Assert.Equal("https://api.example.test/route-that-does-not-exist?value=1", directHttp.Headers.Location?.ToString());
+
+        using var forwardedHttpsRequest = new HttpRequestMessage(HttpMethod.Get, "/route-that-does-not-exist");
+        forwardedHttpsRequest.Headers.Add("X-Forwarded-Proto", "https");
+        var forwardedHttps = await client.SendAsync(forwardedHttpsRequest);
+
+        Assert.Equal(HttpStatusCode.NotFound, forwardedHttps.StatusCode);
+        Assert.True(forwardedHttps.Headers.Contains("Strict-Transport-Security"));
+        Assert.Equal("nosniff", Assert.Single(forwardedHttps.Headers.GetValues("X-Content-Type-Options")));
+    }
+
+    [Fact]
+    public async Task Production_ignores_forged_https_from_an_untrusted_client()
+    {
+        var settings = ProductionTransportSettings(IPAddress.Parse("10.0.0.10"));
+        await using var factory = new ApiFactory(ConnectionString(), settings, environment: Environments.Production);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://api.example.test"),
+            AllowAutoRedirect = false
+        });
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/route-that-does-not-exist");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.PermanentRedirect, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Production_keeps_internal_health_check_on_http()
+    {
+        var settings = ProductionTransportSettings(IPAddress.Parse("10.0.0.10"));
+        settings["ConnectionStrings:ShineDb"] =
+            "Host=127.0.0.1;Port=1;Database=shine;Username=shine_app;Password=production-test-password-with-32-bytes;Timeout=1";
+        await using var factory = new ApiFactory(ConnectionString(), settings, environment: Environments.Production);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://api.example.test"),
+            AllowAutoRedirect = false
+        });
+
+        var response = await client.GetAsync("/health");
+
+        Assert.NotEqual(HttpStatusCode.PermanentRedirect, response.StatusCode);
+        Assert.Null(response.Headers.Location);
+    }
+
+    [Fact]
     public async Task Every_public_authentication_endpoint_is_limited_independently()
     {
         await using var factory = new ApiFactory(ConnectionString(), new Dictionary<string, string?>
@@ -359,6 +444,12 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
         request.Headers.Add("Access-Control-Request-Method", "POST");
         return await client.SendAsync(request);
     }
+
+    private static Dictionary<string, string?> ProductionTransportSettings(IPAddress proxyAddress) => new()
+    {
+        ["Cors:AllowedOrigins:0"] = "https://frontend.example.test",
+        ["TrustedProxies:KnownProxies:0"] = proxyAddress.ToString()
+    };
 
     private string ConnectionString() => fixture.ConnectionString;
 

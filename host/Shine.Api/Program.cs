@@ -56,6 +56,7 @@ var app = builder.Build();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<NullRemoteForwardedHeadersGuardMiddleware>();
 app.UseForwardedHeaders();
+app.UseTransportSecurity(builder.Environment);
 app.UseRouting();
 app.UseCors(SecurityConfiguration.CorsPolicy);
 app.UseMiddleware<RequestDiagnosticsMiddleware>();
