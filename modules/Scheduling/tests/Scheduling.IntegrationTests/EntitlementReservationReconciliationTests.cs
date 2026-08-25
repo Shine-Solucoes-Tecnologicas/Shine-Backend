@@ -20,12 +20,15 @@ public sealed class EntitlementReservationReconciliationTests(DatabaseFixture fi
         var currentTenant = new TestTenant(tenantId);
         await using var coreDb = fixture.CreateDb(currentTenant);
         await using var schedulingDb = fixture.CreateSchedulingDb(currentTenant);
-        var professional = new Professional(tenantId, "Professional", null, 1);
+        var professional = new Professional(tenantId, "Professional");
         var service = new Service(tenantId, "Service", 30);
-        schedulingDb.AddRange(professional, service, new ProfessionalService(tenantId, professional.Id, service.Id));
-        await schedulingDb.SaveChangesAsync();
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb(currentTenant))
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(tenantId, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
         var guard = new EntitlementLimitGuard(coreDb, new FixedEntitlements(10));
-        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new ThrowingPublisher(), new NoOpLogWriter(), guard);
+        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new ThrowingPublisher(), new NoOpLogWriter(), guard, businessCatalog: fixture.CreateBusinessCatalogReader(currentTenant));
         var startsAt = DateTime.UtcNow.AddDays(1);
 
         await Assert.ThrowsAsync<InjectedSchedulingFailure>(() => controller.CreateAppointment(
@@ -129,7 +132,7 @@ public sealed class EntitlementReservationReconciliationTests(DatabaseFixture fi
         Assert.True((await guard.TryReserveAsync(tenantId, EntitlementKeys.SchedulingActiveAppointments, appointment.Id)).Allowed);
         schedulingDb.Appointments.Add(appointment);
         await schedulingDb.SaveChangesAsync();
-        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new NoOpPublisher(), new NoOpLogWriter(), new FailingReleaseGuard(guard));
+        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new NoOpPublisher(), new NoOpLogWriter(), new FailingReleaseGuard(guard), businessCatalog: fixture.CreateBusinessCatalogReader(currentTenant));
 
         await Assert.ThrowsAsync<InjectedSchedulingFailure>(() => controller.ChangeAppointmentStatus(
             appointment.Id,

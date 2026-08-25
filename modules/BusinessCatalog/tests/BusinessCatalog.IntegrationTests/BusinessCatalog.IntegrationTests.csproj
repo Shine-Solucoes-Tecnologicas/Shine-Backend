@@ -15,7 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\host\Shine.Api\Shine.Api.csproj" />
-    <ProjectReference Include="..\..\..\BusinessCatalog\src\BusinessCatalog.Application\BusinessCatalog.Application.csproj" />
     <ProjectReference Include="..\..\..\..\tests\Shine.TestKit\Shine.TestKit.csproj" />
   </ItemGroup>
 </Project>

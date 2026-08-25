@@ -57,4 +57,27 @@ public sealed class SchedulingSettingsTests
 
         Assert.Throws<ArgumentException>(() => settings.Update(15, 0, 0, "Invalid/Zone", ConflictMode.WarnAndConfirm, 1));
     }
+
+    [Fact]
+    public void Professional_capacity_is_a_scheduling_concern()
+    {
+        var settings = new ProfessionalSchedulingSettings(Guid.NewGuid(), Guid.NewGuid(), 2);
+        settings.SetCapacity(4);
+        Assert.Equal(4, settings.MaxConcurrentAppointments);
+        Assert.Throws<ArgumentOutOfRangeException>(() => settings.SetCapacity(0));
+    }
+
+    [Fact]
+    public void Variable_duration_and_professional_override_are_scheduling_concerns()
+    {
+        var tenantId = Guid.NewGuid();
+        var professionalId = Guid.NewGuid();
+        var serviceId = Guid.NewGuid();
+        var service = new ServiceSchedulingSettings(tenantId, serviceId);
+        service.ConfigureVariableDuration("hair-length", 15, 30, 120, "v1");
+        var association = new ProfessionalServiceSchedulingSettings(tenantId, professionalId, serviceId, 45);
+
+        Assert.Equal("hair-length", service.DurationAttributeKey);
+        Assert.Equal(45, association.DurationOverrideMinutes);
+    }
 }

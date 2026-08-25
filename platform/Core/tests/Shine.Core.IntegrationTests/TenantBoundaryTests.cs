@@ -65,20 +65,20 @@ public sealed class TenantBoundaryTests(DatabaseFixture fixture)
     }
 
     [Fact]
-    public async Task Scheduling_filters_tenant_data_and_denies_missing_context()
+    public async Task Business_catalog_filters_unit_data_and_denies_missing_context()
     {
         var tenantA = Guid.NewGuid();
         var tenantB = Guid.NewGuid();
-        await using (var seedDb = fixture.CreateSchedulingDb())
+        await using (var seedDb = fixture.CreateBusinessCatalogDb())
         {
             seedDb.Services.AddRange(new Service(tenantA, "A", 30), new Service(tenantB, "B", 30));
             await seedDb.SaveChangesAsync();
         }
 
-        await using var tenantDb = fixture.CreateSchedulingDb(new FakeTenant(tenantA));
+        await using var tenantDb = fixture.CreateBusinessCatalogDb(new FakeTenant(tenantA));
         Assert.Equal("A", Assert.Single(await tenantDb.Services.Where(x => x.Name == "A" || x.Name == "B").ToArrayAsync()).Name);
 
-        await using var unscoped = fixture.CreateUnscopedSchedulingDb();
+        await using var unscoped = fixture.CreateUnscopedBusinessCatalogDb();
         Assert.Empty(await unscoped.Services.Where(x => x.Name == "A" || x.Name == "B").ToArrayAsync());
         unscoped.Services.Add(new Service(tenantA, "Denied", 30));
         await Assert.ThrowsAsync<TenantIsolationException>(() => unscoped.SaveChangesAsync());

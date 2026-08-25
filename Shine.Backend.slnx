@@ -23,6 +23,15 @@
     <Project Path="modules/Billing/tests/Billing.UnitTests/Billing.UnitTests.csproj" />
     <Project Path="modules/Billing/tests/Billing.IntegrationTests/Billing.IntegrationTests.csproj" />
   </Folder>
+  <Folder Name="/modules/BusinessCatalog/src/">
+    <Project Path="modules/BusinessCatalog/src/BusinessCatalog.Domain/BusinessCatalog.Domain.csproj" />
+    <Project Path="modules/BusinessCatalog/src/BusinessCatalog.Application/BusinessCatalog.Application.csproj" />
+    <Project Path="modules/BusinessCatalog/src/BusinessCatalog.Infrastructure/BusinessCatalog.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/modules/BusinessCatalog/tests/">
+    <Project Path="modules/BusinessCatalog/tests/BusinessCatalog.UnitTests/BusinessCatalog.UnitTests.csproj" />
+    <Project Path="modules/BusinessCatalog/tests/BusinessCatalog.IntegrationTests/BusinessCatalog.IntegrationTests.csproj" />
+  </Folder>
   <Folder Name="/modules/Scheduling/src/">
     <Project Path="modules/Scheduling/src/Scheduling.Domain/Scheduling.Domain.csproj" />
     <Project Path="modules/Scheduling/src/Scheduling.Application/Scheduling.Application.csproj" />

@@ -9,13 +9,24 @@ public sealed class ModuleBoundaryTests
     [Theory]
     [InlineData("Billing", "Scheduling")]
     [InlineData("Scheduling", "Billing")]
-    public void Feature_modules_do_not_reference_each_other(string module, string forbiddenModule)
+    [InlineData("Billing", "BusinessCatalog")]
+    [InlineData("BusinessCatalog", "Billing")]
+    [InlineData("Scheduling", "BusinessCatalog")]
+    [InlineData("BusinessCatalog", "Scheduling")]
+    public void Feature_modules_reference_each_other_only_through_application_contracts(string module, string forbiddenModule)
     {
         var projectFiles = Directory.GetFiles(Path.Combine(Root, "modules", module), "*.csproj", SearchOption.AllDirectories);
 
         foreach (var projectFile in projectFiles)
             Assert.DoesNotContain(ProjectReferences(projectFile), reference =>
-                Normalize(reference).Contains($"/modules/{forbiddenModule}/", StringComparison.OrdinalIgnoreCase));
+            {
+                var normalized = Normalize(reference);
+                var targetsModule = normalized.Contains($"/modules/{forbiddenModule}/", StringComparison.OrdinalIgnoreCase);
+                var targetsApplication = normalized.Contains(
+                    $"/modules/{forbiddenModule}/src/{forbiddenModule}.Application/",
+                    StringComparison.OrdinalIgnoreCase);
+                return targetsModule && !targetsApplication;
+            });
     }
 
     [Fact]

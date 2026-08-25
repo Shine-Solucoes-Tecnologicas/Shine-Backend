@@ -51,22 +51,27 @@ public sealed class SchedulingDashboardWidgetTests(DatabaseFixture fixture)
         var date = new DateOnly(2026, 8, 24);
         var fromUtc = new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero);
         var toUtc = fromUtc.AddHours(3);
-        var professional = new Professional(unit.Id, "Professional", maxConcurrentAppointments: 1);
+        var professional = new Professional(unit.Id, "Professional");
         var service = new Service(unit.Id, "Service", 30);
         var foreignProfessional = new Professional(foreignUnit.Id, "Foreign professional");
         var foreignService = new Service(foreignUnit.Id, "Foreign service", 30);
         var settings = new SchedulingSettings(unit.Id);
         settings.Update(15, 0, 0, "America/Sao_Paulo", ConflictMode.Block, 1);
 
+        await using (var catalog = fixture.CreateBusinessCatalogDb())
+        {
+            catalog.AddRange(professional, service, new ProfessionalService(unit.Id, professional.Id, service.Id),
+                foreignProfessional, foreignService,
+                new ProfessionalService(foreignUnit.Id, foreignProfessional.Id, foreignService.Id));
+            await catalog.SaveChangesAsync();
+        }
+
         await using (var db = fixture.CreateSchedulingDb())
         {
-            db.AddRange(professional, service, new ProfessionalService(unit.Id, professional.Id, service.Id),
-                settings, new AvailabilityRule(unit.Id, professional.Id, date.DayOfWeek,
+            db.AddRange(settings, new AvailabilityRule(unit.Id, professional.Id, date.DayOfWeek,
                     new TimeSpan(9, 0, 0), new TimeSpan(12, 0, 0)),
                 new Appointment(unit.Id, professional.Id, service.Id, "Visible customer", "hidden@example.test",
                     fromUtc.UtcDateTime.AddHours(1), fromUtc.UtcDateTime.AddHours(1.5)),
-                foreignProfessional, foreignService,
-                new ProfessionalService(foreignUnit.Id, foreignProfessional.Id, foreignService.Id),
                 new Appointment(foreignUnit.Id, foreignProfessional.Id, foreignService.Id, "Foreign customer", "foreign@example.test",
                     fromUtc.UtcDateTime.AddMinutes(30), fromUtc.UtcDateTime.AddHours(1)));
             await db.SaveChangesAsync();

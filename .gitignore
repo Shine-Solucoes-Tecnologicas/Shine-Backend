@@ -144,6 +144,7 @@ vite.config.ts.timestamp-*
 # .NET
 bin/
 obj/
+.packages/
 
 # IDEs
 .vs/

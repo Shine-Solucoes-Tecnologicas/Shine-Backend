@@ -27,16 +27,20 @@ public sealed class PublicSchedulingCapacityTests(DatabaseFixture fixture)
     private async Task<ActionResult<PublicAppointmentResponse>> BookAsync(ConflictMode mode, bool allowConflict)
     {
         var tenantId = Guid.NewGuid();
-        var professional = new Professional(tenantId, $"Public {Guid.NewGuid():N}", maxConcurrentAppointments: 2);
+        var professional = new Professional(tenantId, $"Public {Guid.NewGuid():N}");
         var service = new Service(tenantId, $"Public service {Guid.NewGuid():N}", 30);
         var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5));
         var startsAt = date.ToDateTime(new TimeOnly(9, 0), DateTimeKind.Utc);
         var settings = new SchedulingSettings(tenantId);
         settings.Update(30, 0, 0, "UTC", mode, 2);
+        await using (var catalogSetup = fixture.CreateBusinessCatalogDb())
+        {
+            catalogSetup.AddRange(professional, service, new ProfessionalService(tenantId, professional.Id, service.Id));
+            await catalogSetup.SaveChangesAsync();
+        }
         await using (var setup = fixture.CreateSchedulingDb())
         {
-            setup.AddRange(professional, service, new ProfessionalService(tenantId, professional.Id, service.Id),
-                new AvailabilityRule(tenantId, professional.Id, date.DayOfWeek, new TimeSpan(9, 0, 0), new TimeSpan(10, 0, 0)),
+            setup.AddRange(new AvailabilityRule(tenantId, professional.Id, date.DayOfWeek, new TimeSpan(9, 0, 0), new TimeSpan(10, 0, 0)),
                 settings,
                 new Appointment(tenantId, professional.Id, service.Id, "Existing", "existing@example.test", startsAt, startsAt.AddMinutes(30)));
             await setup.SaveChangesAsync();
@@ -46,7 +50,7 @@ public sealed class PublicSchedulingCapacityTests(DatabaseFixture fixture)
         var execution = new TenantExecutionContext(noTenant);
         await using var db = fixture.CreateSchedulingDb(noTenant, execution);
         var controller = new PublicSchedulingController(db, new AvailabilitySlotCalculator(), new ServiceDurationEstimator([]),
-            new NoOpPublisher(), new EnabledModuleAccess(), new UnlimitedGuard(), execution);
+            new NoOpPublisher(), new EnabledModuleAccess(), new UnlimitedGuard(), execution, fixture.CreateBusinessCatalogReader(noTenant, execution));
         return await controller.CreateAppointment(tenantId,
             new PublicCreateAppointmentRequest(professional.Id, service.Id, "Customer", "customer@example.test",
                 startsAt, startsAt.AddMinutes(30), AllowConflict: allowConflict), default);

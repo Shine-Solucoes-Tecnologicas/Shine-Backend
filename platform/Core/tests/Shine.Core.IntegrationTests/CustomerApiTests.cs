@@ -255,9 +255,14 @@ public sealed class CustomerApiTests(DatabaseFixture fixture)
             latestStart, latestStart.AddMinutes(30), customer.Id);
         var foreign = new Appointment(setup.OtherTenant.Id, foreignProfessional.Id, foreignService.Id, "Foreign snapshot", "foreign-secret",
             latestStart.AddHours(1), latestStart.AddHours(1).AddMinutes(30), foreignCustomer.Id);
+        await using (var catalog = fixture.CreateBusinessCatalogDb())
+        {
+            catalog.AddRange(professional, service, foreignProfessional, foreignService);
+            await catalog.SaveChangesAsync();
+        }
         await using (var scheduling = fixture.CreateSchedulingDb())
         {
-            scheduling.AddRange(professional, service, foreignProfessional, foreignService, older, latest, foreign);
+            scheduling.AddRange(older, latest, foreign);
             await scheduling.SaveChangesAsync();
         }
 

@@ -52,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<ICustomerAccountAuthorization, CustomerAccountAuthorization>();
         services.AddScoped<ICustomerManagement, CustomerManagement>();
         services.AddScoped<ICustomerReferenceValidator, CustomerManagement>();
+        services.AddScoped<IUserUnitReferenceValidator, UserUnitReferenceValidator>();
         services.AddOptions<FileStorageOptions>().BindConfiguration("FileStorage");
         services.AddSingleton<IFileStorage, LocalFileStorage>();
         services.AddScoped<StoredFileDeletionProcessor>();
