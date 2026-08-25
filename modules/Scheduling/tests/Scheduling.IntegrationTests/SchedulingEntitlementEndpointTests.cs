@@ -20,10 +20,13 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         var unitId = Guid.NewGuid();
         var professional = new Professional(unitId, $"Professional {Guid.NewGuid():N}");
         var service = new Service(unitId, $"Service {Guid.NewGuid():N}", 30);
-        db.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
-        await db.SaveChangesAsync();
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb())
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
         var controller = new SchedulingController(db, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-            new NoOpPublisher(), new NoOpLogWriter(), new NotConfiguredGuard());
+            new NoOpPublisher(), new NoOpLogWriter(), new NotConfiguredGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
         var startsAtUtc = DateTime.UtcNow.AddDays(2);
 
         var response = await controller.CreateAppointment(new CreateAppointmentRequest(
@@ -38,9 +41,9 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
     public async Task Concurrent_authenticated_creation_does_not_exceed_professional_capacity()
     {
         var unitId = Guid.NewGuid();
-        var professional = new Professional(unitId, $"Concurrent {Guid.NewGuid():N}", maxConcurrentAppointments: 1);
+        var professional = new Professional(unitId, $"Concurrent {Guid.NewGuid():N}");
         var service = new Service(unitId, $"Concurrent service {Guid.NewGuid():N}", 30);
-        await using (var setup = fixture.CreateSchedulingDb())
+        await using (var setup = fixture.CreateBusinessCatalogDb())
         {
             setup.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
             await setup.SaveChangesAsync();
@@ -52,7 +55,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         {
             await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
             var controller = new SchedulingController(db, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard());
+                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
             return await controller.CreateAppointment(request, default);
         }
 
@@ -69,14 +72,19 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
     public async Task Concurrent_reschedules_serialize_the_destination_capacity()
     {
         var unitId = Guid.NewGuid();
-        var professional = new Professional(unitId, $"Reschedule {Guid.NewGuid():N}", maxConcurrentAppointments: 1);
+        var professional = new Professional(unitId, $"Reschedule {Guid.NewGuid():N}");
         var service = new Service(unitId, $"Reschedule service {Guid.NewGuid():N}", 30);
         var baseTime = DateTime.UtcNow.AddDays(4);
         var first = new Appointment(unitId, professional.Id, service.Id, "First", "first@example.test", baseTime, baseTime.AddMinutes(30));
         var second = new Appointment(unitId, professional.Id, service.Id, "Second", "second@example.test", baseTime.AddHours(1), baseTime.AddHours(1).AddMinutes(30));
+        await using (var catalogSetup = fixture.CreateBusinessCatalogDb())
+        {
+            catalogSetup.AddRange(professional, service);
+            await catalogSetup.SaveChangesAsync();
+        }
         await using (var setup = fixture.CreateSchedulingDb())
         {
-            setup.AddRange(professional, service, first, second);
+            setup.AddRange(first, second);
             await setup.SaveChangesAsync();
         }
         var target = baseTime.AddHours(3);
@@ -85,7 +93,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         {
             await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
             var controller = new SchedulingController(db, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard());
+                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
             return await controller.RescheduleAppointment(id,
                 new RescheduleAppointmentRequest(target, target.AddMinutes(30), version), default);
         }
@@ -109,13 +117,16 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
 
         var professional = new Professional(tenant.Id, $"Professional {Guid.NewGuid():N}");
         var service = new Service(tenant.Id, $"Service {Guid.NewGuid():N}", 30);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb(new TestTenant(tenant.Id)))
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(tenant.Id, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
         await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(tenant.Id));
-        schedulingDb.AddRange(professional, service, new ProfessionalService(tenant.Id, professional.Id, service.Id));
-        await schedulingDb.SaveChangesAsync();
         var publisher = new CapturingPublisher();
         var validator = new CustomerManagement(customerDb);
         var controller = new SchedulingController(schedulingDb, new TestTenant(tenant.Id), new AvailabilitySlotCalculator(),
-            publisher, new NoOpLogWriter(), new UnlimitedGuard(), validator);
+            publisher, new NoOpLogWriter(), new UnlimitedGuard(), validator, fixture.CreateBusinessCatalogReader(new TestTenant(tenant.Id)));
         var startsAtUtc = DateTime.UtcNow.AddDays(5);
 
         var result = await controller.CreateAppointment(new CreateAppointmentRequest(
@@ -146,11 +157,14 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
 
         var professional = new Professional(tenant.Id, $"Professional {Guid.NewGuid():N}");
         var service = new Service(tenant.Id, $"Service {Guid.NewGuid():N}", 30);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb(new TestTenant(tenant.Id)))
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(tenant.Id, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
         await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(tenant.Id));
-        schedulingDb.AddRange(professional, service, new ProfessionalService(tenant.Id, professional.Id, service.Id));
-        await schedulingDb.SaveChangesAsync();
         var controller = new SchedulingController(schedulingDb, new TestTenant(tenant.Id), new AvailabilitySlotCalculator(),
-            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new CustomerManagement(customerDb));
+            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new CustomerManagement(customerDb), fixture.CreateBusinessCatalogReader(new TestTenant(tenant.Id)));
         var startsAtUtc = DateTime.UtcNow.AddDays(6);
 
         foreach (var customerId in new[] { foreignCustomer.Id, inactiveCustomer.Id })
@@ -180,14 +194,41 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
 
         var professional = new Professional(tenant.Id, $"Professional {Guid.NewGuid():N}");
         var service = new Service(tenant.Id, $"Service {Guid.NewGuid():N}", 30);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb())
+        {
+            catalogDb.AddRange(professional, service);
+            await catalogDb.SaveChangesAsync();
+        }
         await using var schedulingDb = fixture.CreateSchedulingDb();
-        schedulingDb.AddRange(professional, service);
-        await schedulingDb.SaveChangesAsync();
         var startsAtUtc = DateTime.UtcNow.AddDays(7);
         schedulingDb.Appointments.Add(new Appointment(tenant.Id, professional.Id, service.Id, "Snapshot", "contact",
             startsAtUtc, startsAtUtc.AddMinutes(30), foreignCustomer.Id));
 
         await Assert.ThrowsAsync<DbUpdateException>(() => schedulingDb.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Authenticated_creation_rejects_an_inactive_catalog_entry_through_the_contract()
+    {
+        var unitId = Guid.NewGuid();
+        var professional = new Professional(unitId, $"Inactive {Guid.NewGuid():N}");
+        professional.SetActive(false);
+        var service = new Service(unitId, $"Service {Guid.NewGuid():N}", 30);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb())
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
+        await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(unitId));
+        var controller = new SchedulingController(schedulingDb, new TestTenant(unitId), new AvailabilitySlotCalculator(),
+            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
+        var startsAtUtc = DateTime.UtcNow.AddDays(3);
+
+        var result = await controller.CreateAppointment(new CreateAppointmentRequest(
+            professional.Id, service.Id, "Customer", "contact", startsAtUtc, startsAtUtc.AddMinutes(30)), default);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        Assert.False(await schedulingDb.Appointments.AnyAsync(x => x.TenantId == unitId));
     }
 
     private sealed record TestTenant(Guid UnitId) : ICurrentTenant

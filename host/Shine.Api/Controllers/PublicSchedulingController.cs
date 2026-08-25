@@ -7,6 +7,7 @@ using Scheduling.Application;
 using Scheduling.Domain;
 using Scheduling.Infrastructure;
 using Shine.Infrastructure;
+using Shine.Application;
 
 namespace Shine.Api.Controllers;
 
@@ -21,7 +22,8 @@ public sealed class PublicSchedulingController(
     IAppointmentEventPublisher eventPublisher,
     IModuleAccess moduleAccess,
     IEntitlementLimitGuard entitlementLimits,
-    ITenantExecutionContext tenantExecutionContext) : ControllerBase
+    ITenantExecutionContext tenantExecutionContext,
+    IBusinessCatalogReader? businessCatalog = null) : ControllerBase
 {
     [HttpGet("availability/slots")]
     public async Task<ActionResult<IReadOnlyCollection<PublicAvailabilitySlotResponse>>> Slots(
@@ -59,13 +61,13 @@ public sealed class PublicSchedulingController(
         if (string.IsNullOrWhiteSpace(request.CustomerName) || request.CustomerName.Length > 160 || string.IsNullOrWhiteSpace(request.CustomerContact) || request.CustomerContact.Length > 200)
             return BadRequest(new { code = "INVALID_CUSTOMER_DATA", message = "Customer name or contact is invalid." });
 
-        var service = await db.Services.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ServiceId && x.TenantId == tenantId && x.IsActive, cancellationToken);
-        var professional = await db.Professionals.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ProfessionalId && x.TenantId == tenantId && x.IsActive, cancellationToken);
-        var association = await db.ProfessionalServices.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.ServiceId == request.ServiceId && x.IsActive, cancellationToken);
-        if (service is null || professional is null || association is null) return NotFound();
+        var service = await Catalog.FindServiceAsync(tenantId, request.ServiceId, cancellationToken);
+        var professional = await Catalog.FindProfessionalAsync(tenantId, request.ProfessionalId, cancellationToken);
+        var associated = await Catalog.IsActiveAssociationAsync(tenantId, request.ProfessionalId, request.ServiceId, cancellationToken);
+        if (service is not { IsActive: true } || professional is not { IsActive: true } || !associated) return NotFound();
 
         ServiceDurationEstimate duration;
-        try { duration = durationEstimator.Estimate(new ServiceDurationContext(tenantId, request.ServiceId, request.ProfessionalId, request.Attributes ?? new Dictionary<string, string>(), service.GetDurationPolicy()), association.DurationOverrideMinutes ?? service.DurationMinutes); }
+        try { duration = await EstimateDurationAsync(tenantId, request.ProfessionalId, service, request.Attributes, cancellationToken); }
         catch (ArgumentException exception) { return BadRequest(new { code = "INVALID_DURATION_ATTRIBUTES", message = exception.Message }); }
         if (request.EndsAtUtc != request.StartsAtUtc.AddMinutes(duration.DurationMinutes))
             return BadRequest(new { code = "INVALID_DURATION", message = "Appointment end does not match the estimated service duration.", durationMinutes = duration.DurationMinutes });
@@ -88,7 +90,8 @@ public sealed class PublicSchedulingController(
 
         var conflictCount = await db.Appointments.CountAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.Status != AppointmentStatus.Cancelled && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
         var blocked = await db.ScheduleBlocks.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
-        var policy = new Shine.Domain.CapacityPolicy(professional.MaxConcurrentAppointments, settings.ConflictMode);
+        var capacity = await GetProfessionalCapacityAsync(tenantId, request.ProfessionalId, settings.DefaultMaxConcurrentAppointments, cancellationToken);
+        var policy = new Shine.Domain.CapacityPolicy(capacity, settings.ConflictMode);
         if (blocked) return Conflict(new { code = "APPOINTMENT_UNAVAILABLE", message = "The requested period is no longer available." });
         if (policy.IsCapacityExceeded(conflictCount)) return Conflict(new { code = "CAPACITY_EXCEEDED", message = "Professional capacity is exceeded for this period.", current = conflictCount, capacity = policy.MaxConcurrent });
         if (policy.ConflictMode == Shine.Domain.ConflictMode.Block && conflictCount > 0) return Conflict(new { code = "APPOINTMENT_CONFLICT", message = "The scheduling policy blocks overlapping appointments." });
@@ -129,13 +132,13 @@ public sealed class PublicSchedulingController(
 
     private async Task<AvailabilityData?> LoadAvailabilityAsync(Guid tenantId, Guid professionalId, Guid serviceId, DateOnly date, IReadOnlyDictionary<string, string>? attributes, CancellationToken cancellationToken)
     {
-        var professional = await db.Professionals.AsNoTracking().SingleOrDefaultAsync(x => x.Id == professionalId && x.TenantId == tenantId && x.IsActive, cancellationToken);
-        var service = await db.Services.AsNoTracking().SingleOrDefaultAsync(x => x.Id == serviceId && x.TenantId == tenantId && x.IsActive, cancellationToken);
-        var association = await db.ProfessionalServices.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.ServiceId == serviceId && x.IsActive, cancellationToken);
-        if (professional is null || service is null || association is null) return null;
+        var professional = await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken);
+        var service = await Catalog.FindServiceAsync(tenantId, serviceId, cancellationToken);
+        var associated = await Catalog.IsActiveAssociationAsync(tenantId, professionalId, serviceId, cancellationToken);
+        if (professional is not { IsActive: true } || service is not { IsActive: true } || !associated) return null;
 
         var settings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken) ?? new SchedulingSettings(tenantId);
-        var duration = durationEstimator.Estimate(new ServiceDurationContext(tenantId, serviceId, professionalId, attributes ?? new Dictionary<string, string>(), service.GetDurationPolicy()), association.DurationOverrideMinutes ?? service.DurationMinutes);
+        var duration = await EstimateDurationAsync(tenantId, professionalId, service, attributes, cancellationToken);
         var rules = await db.AvailabilityRules.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.IsActive).ToArrayAsync(cancellationToken);
         var exceptions = await db.AvailabilityExceptions.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.Date == date).ToArrayAsync(cancellationToken);
         var zone = TimeZoneInfo.FindSystemTimeZoneById(settings.TimeZoneId);
@@ -143,13 +146,31 @@ public sealed class PublicSchedulingController(
         var toUtc = fromUtc.AddDays(1);
         var blocks = await db.ScheduleBlocks.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.EndsAtUtc > fromUtc && x.StartsAtUtc < toUtc).ToArrayAsync(cancellationToken);
         var occupied = await db.Appointments.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.Status != AppointmentStatus.Cancelled && x.EndsAtUtc > fromUtc && x.StartsAtUtc < toUtc).Select(x => new { x.StartsAtUtc, x.EndsAtUtc }).ToArrayAsync(cancellationToken);
+        var capacity = await GetProfessionalCapacityAsync(tenantId, professionalId, settings.DefaultMaxConcurrentAppointments, cancellationToken);
         return new AvailabilityData(settings.TimeZoneId, settings.BufferBeforeMinutes, settings.BufferAfterMinutes, settings.SlotIntervalMinutes,
-            professional.MaxConcurrentAppointments, settings.ConflictMode, duration, rules, exceptions, blocks, occupied.Select(x => (x.StartsAtUtc, x.EndsAtUtc)).ToArray());
+            capacity, settings.ConflictMode, duration, rules, exceptions, blocks, occupied.Select(x => (x.StartsAtUtc, x.EndsAtUtc)).ToArray());
     }
 
     private sealed record AvailabilityData(string TimeZoneId, int BufferBeforeMinutes, int BufferAfterMinutes, int SlotIntervalMinutes,
         int MaxConcurrentAppointments, Shine.Domain.ConflictMode ConflictMode, ServiceDurationEstimate Duration,
         AvailabilityRule[] Rules, AvailabilityException[] Exceptions, ScheduleBlock[] Blocks, (DateTime StartsAtUtc, DateTime EndsAtUtc)[] Occupied);
+
+    private IBusinessCatalogReader Catalog => businessCatalog ?? throw new InvalidOperationException("Business catalog reader is required.");
+
+    private async Task<int> GetProfessionalCapacityAsync(Guid tenantId, Guid professionalId, int fallback, CancellationToken cancellationToken) =>
+        (await db.ProfessionalSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId, cancellationToken))?.MaxConcurrentAppointments ?? fallback;
+
+    private async Task<ServiceDurationEstimate> EstimateDurationAsync(Guid tenantId, Guid professionalId, ServiceCatalogEntry service, IReadOnlyDictionary<string, string>? attributes, CancellationToken cancellationToken)
+    {
+        var policySettings = await db.ServiceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ServiceId == service.Id, cancellationToken);
+        var associationSettings = await db.ProfessionalServiceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.ServiceId == service.Id, cancellationToken);
+        var policy = policySettings?.DurationAttributeKey is null ? null : new ServiceDurationPolicy(
+            policySettings.DurationAttributeKey, policySettings.MinutesPerAttributeUnit!.Value,
+            policySettings.MinimumDurationMinutes!.Value, policySettings.MaximumDurationMinutes!.Value,
+            policySettings.DurationRuleVersion!).Validate();
+        return durationEstimator.Estimate(new ServiceDurationContext(tenantId, service.Id, professionalId,
+            attributes ?? new Dictionary<string, string>(), policy), associationSettings?.DurationOverrideMinutes ?? service.DurationMinutes);
+    }
 }
 
 public sealed record PublicCreateAppointmentRequest(Guid ProfessionalId, Guid ServiceId, string CustomerName, string CustomerContact,

@@ -9,6 +9,10 @@ public sealed class ModuleBoundaryTests
     [Theory]
     [InlineData("Billing", "Scheduling")]
     [InlineData("Scheduling", "Billing")]
+    [InlineData("Billing", "BusinessCatalog")]
+    [InlineData("BusinessCatalog", "Billing")]
+    [InlineData("Scheduling", "BusinessCatalog")]
+    [InlineData("BusinessCatalog", "Scheduling")]
     public void Feature_modules_do_not_reference_each_other(string module, string forbiddenModule)
     {
         var projectFiles = Directory.GetFiles(Path.Combine(Root, "modules", module), "*.csproj", SearchOption.AllDirectories);

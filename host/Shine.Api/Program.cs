@@ -4,6 +4,7 @@ using Shine.Infrastructure;
 using Shine.Api;
 using Scheduling.Infrastructure;
 using Billing.Infrastructure;
+using BusinessCatalog.Infrastructure;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,7 @@ var connectionString = builder.Configuration.GetSection("ConnectionStrings").Get
 builder.Services.AddInfrastructure(connectionString);
 builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("RabbitMq"));
 builder.Services.AddScheduling(connectionString);
+builder.Services.AddBusinessCatalog(connectionString);
 builder.Services.AddBillingInfrastructure(connectionString);
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<Shine.Infrastructure.Persistence.ShineDbContext>("postgresql")

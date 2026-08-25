@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Scheduling.Infrastructure;
@@ -11,9 +12,11 @@ using Scheduling.Infrastructure;
 namespace Scheduling.Infrastructure.Migrations
 {
     [DbContext(typeof(SchedulingDbContext))]
-    partial class SchedulingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260824191640_TransferBusinessCatalogOwnership")]
+    partial class TransferBusinessCatalogOwnership
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -168,38 +171,6 @@ namespace Scheduling.Infrastructure.Migrations
                     b.HasIndex("TenantId", "ProfessionalId", "StartsAtUtc", "EndsAtUtc");
 
                     b.ToTable("ScheduleBlocks");
-                });
-
-            modelBuilder.Entity("Scheduling.Domain.ProfessionalSchedulingSettings", b =>
-                {
-                    b.Property<Guid>("TenantId").HasColumnType("uuid");
-                    b.Property<Guid>("ProfessionalId").HasColumnType("uuid");
-                    b.Property<int>("MaxConcurrentAppointments").ValueGeneratedOnAdd().HasColumnType("integer").HasDefaultValue(1);
-                    b.HasKey("TenantId", "ProfessionalId");
-                    b.ToTable("ProfessionalSchedulingSettings", (string)null);
-                });
-
-            modelBuilder.Entity("Scheduling.Domain.ProfessionalServiceSchedulingSettings", b =>
-                {
-                    b.Property<Guid>("TenantId").HasColumnType("uuid");
-                    b.Property<Guid>("ProfessionalId").HasColumnType("uuid");
-                    b.Property<Guid>("ServiceId").HasColumnType("uuid");
-                    b.Property<int?>("DurationOverrideMinutes").HasColumnType("integer");
-                    b.HasKey("TenantId", "ProfessionalId", "ServiceId");
-                    b.ToTable("ProfessionalServiceSchedulingSettings", (string)null);
-                });
-
-            modelBuilder.Entity("Scheduling.Domain.ServiceSchedulingSettings", b =>
-                {
-                    b.Property<Guid>("TenantId").HasColumnType("uuid");
-                    b.Property<Guid>("ServiceId").HasColumnType("uuid");
-                    b.Property<string>("DurationAttributeKey").HasMaxLength(120).HasColumnType("character varying(120)");
-                    b.Property<string>("DurationRuleVersion").HasMaxLength(80).HasColumnType("character varying(80)");
-                    b.Property<int?>("MaximumDurationMinutes").HasColumnType("integer");
-                    b.Property<int?>("MinimumDurationMinutes").HasColumnType("integer");
-                    b.Property<int?>("MinutesPerAttributeUnit").HasColumnType("integer");
-                    b.HasKey("TenantId", "ServiceId");
-                    b.ToTable("ServiceSchedulingSettings", (string)null);
                 });
 
             modelBuilder.Entity("Scheduling.Domain.SchedulingSettings", b =>

@@ -15,100 +15,59 @@ namespace Shine.Api.Controllers;
 [Authorize]
 [RequiresModule("SCHEDULING")]
 [Route("api/scheduling")]
-public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter, IEntitlementLimitGuard entitlementLimits, ICustomerReferenceValidator? customerReferences = null) : ControllerBase
+public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter, IEntitlementLimitGuard entitlementLimits, ICustomerReferenceValidator? customerReferences = null, IBusinessCatalogReader? businessCatalog = null) : ControllerBase
 {
-    [HttpGet("professionals")]
-    public async Task<ActionResult<PagedResponse<ProfessionalResponse>>> Professionals([FromQuery] PagedRequest request, CancellationToken cancellationToken)
-    {
-        var tenantId = RequireTenant(); var query = db.Professionals.AsNoTracking().Where(x => x.TenantId == tenantId);
-        var total = await query.CountAsync(cancellationToken); var items = await query.OrderBy(x => x.Name).Skip((request.ValidatedPage - 1) * request.ValidatedPageSize).Take(request.ValidatedPageSize).Select(x => new ProfessionalResponse(x.Id, x.Name, x.UserId, x.IsActive, x.MaxConcurrentAppointments)).ToArrayAsync(cancellationToken);
-        return Ok(PagedResponse<ProfessionalResponse>.Create(items, request.ValidatedPage, request.ValidatedPageSize, total));
-    }
-
-    [HttpPost("professionals")]
-    [RequiresPermission("scheduling.manage")]
-    public async Task<ActionResult<ProfessionalResponse>> CreateProfessional(CreateProfessionalRequest request, CancellationToken cancellationToken)
-    {
-        var tenantId = RequireTenant();
-        var settings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        Professional item;
-        try { item = new Professional(tenantId, request.Name, request.UserId, request.MaxConcurrentAppointments ?? settings?.DefaultMaxConcurrentAppointments ?? 1); }
-        catch (ArgumentException exception) { return BadRequest(new { code = "INVALID_PROFESSIONAL", message = exception.Message }); }
-        db.Professionals.Add(item); await db.SaveChangesAsync(cancellationToken); return Ok(new ProfessionalResponse(item.Id, item.Name, item.UserId, item.IsActive, item.MaxConcurrentAppointments));
-    }
-
     [HttpPut("professionals/{professionalId:guid}/capacity")]
     [RequiresPermission("scheduling.manage")]
-    public async Task<ActionResult<ProfessionalResponse>> UpdateProfessionalCapacity(Guid professionalId, UpdateProfessionalCapacityRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<ProfessionalCapacityResponse>> UpdateProfessionalCapacity(Guid professionalId, UpdateProfessionalCapacityRequest request, CancellationToken cancellationToken)
     {
-        var item = await db.Professionals.SingleOrDefaultAsync(x => x.Id == professionalId && x.TenantId == RequireTenant(), cancellationToken);
-        if (item is null) return NotFound();
-        try { item.SetMaxConcurrentAppointments(request.MaxConcurrentAppointments); }
-        catch (ArgumentOutOfRangeException exception) { return BadRequest(new { code = "INVALID_CAPACITY", message = exception.Message }); }
-        await db.SaveChangesAsync(cancellationToken);
-        return Ok(new ProfessionalResponse(item.Id, item.Name, item.UserId, item.IsActive, item.MaxConcurrentAppointments));
-    }
-
-    [HttpGet("services")]
-    public async Task<ActionResult<PagedResponse<ServiceResponse>>> Services([FromQuery] PagedRequest request, CancellationToken cancellationToken)
-    {
-        var tenantId = RequireTenant(); var query = db.Services.AsNoTracking().Where(x => x.TenantId == tenantId);
-        var total = await query.CountAsync(cancellationToken); var items = await query.OrderBy(x => x.Name).Skip((request.ValidatedPage - 1) * request.ValidatedPageSize).Take(request.ValidatedPageSize).Select(x => new ServiceResponse(x.Id, x.Name, x.DurationMinutes, x.IsActive, x.DurationAttributeKey, x.MinutesPerAttributeUnit, x.MinimumDurationMinutes, x.MaximumDurationMinutes, x.DurationRuleVersion)).ToArrayAsync(cancellationToken);
-        return Ok(PagedResponse<ServiceResponse>.Create(items, request.ValidatedPage, request.ValidatedPageSize, total));
-    }
-
-    [HttpPost("services")]
-    [RequiresPermission("scheduling.manage")]
-    public async Task<ActionResult<ServiceResponse>> CreateService(CreateServiceRequest request, CancellationToken cancellationToken)
-    {
+        var tenantId = RequireTenant();
+        if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
+        var item = await db.ProfessionalSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId, cancellationToken);
         try
         {
-            var item = new Service(RequireTenant(), request.Name, request.DurationMinutes);
-            if (request.VariableDuration is not null) item.ConfigureVariableDuration(request.VariableDuration.AttributeKey, request.VariableDuration.MinutesPerUnit, request.VariableDuration.MinimumMinutes, request.VariableDuration.MaximumMinutes, request.VariableDuration.Version);
-            db.Services.Add(item); await db.SaveChangesAsync(cancellationToken);
-            return Ok(new ServiceResponse(item.Id, item.Name, item.DurationMinutes, item.IsActive, item.DurationAttributeKey, item.MinutesPerAttributeUnit, item.MinimumDurationMinutes, item.MaximumDurationMinutes, item.DurationRuleVersion));
+            if (item is null) { item = new ProfessionalSchedulingSettings(tenantId, professionalId, request.MaxConcurrentAppointments); db.ProfessionalSettings.Add(item); }
+            else item.SetCapacity(request.MaxConcurrentAppointments);
+        }
+        catch (ArgumentOutOfRangeException exception) { return BadRequest(new { code = "INVALID_CAPACITY", message = exception.Message }); }
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new ProfessionalCapacityResponse(professionalId, item.MaxConcurrentAppointments));
+    }
+
+    [HttpPut("services/{serviceId:guid}/duration-policy")]
+    [RequiresPermission("scheduling.manage")]
+    public async Task<ActionResult<ServiceDurationPolicyResponse>> UpdateServiceDurationPolicy(Guid serviceId, VariableServiceDurationRequest? request, CancellationToken cancellationToken)
+    {
+        var tenantId = RequireTenant();
+        if (await Catalog.FindServiceAsync(tenantId, serviceId, cancellationToken) is null) return NotFound();
+        var item = await db.ServiceSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ServiceId == serviceId, cancellationToken);
+        item ??= new ServiceSchedulingSettings(tenantId, serviceId);
+        try
+        {
+            if (request is null) item.UseFixedDuration();
+            else item.ConfigureVariableDuration(request.AttributeKey, request.MinutesPerUnit, request.MinimumMinutes, request.MaximumMinutes, request.Version);
         }
         catch (ArgumentException exception) { return BadRequest(new { code = "INVALID_SERVICE_DURATION", message = exception.Message }); }
-    }
-
-    [HttpGet("professionals/{professionalId:guid}/services")]
-    public async Task<ActionResult<IReadOnlyCollection<ProfessionalServiceResponse>>> ProfessionalServices(Guid professionalId, CancellationToken cancellationToken)
-    {
-        var tenantId = RequireTenant();
-        var professionalExists = await db.Professionals.AnyAsync(x => x.Id == professionalId && x.TenantId == tenantId, cancellationToken);
-        if (!professionalExists) return NotFound();
-        var items = await db.ProfessionalServices.AsNoTracking()
-            .Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId)
-            .Join(db.Services, link => link.ServiceId, service => service.Id, (link, service) => new ProfessionalServiceResponse(link.Id, service.Id, service.Name, link.DurationOverrideMinutes, link.IsActive))
-            .OrderBy(x => x.Name)
-            .ToArrayAsync(cancellationToken);
-        return Ok(items);
-    }
-
-    [HttpPut("professionals/{professionalId:guid}/services/{serviceId:guid}")]
-    [RequiresPermission("scheduling.manage")]
-    public async Task<ActionResult<ProfessionalServiceResponse>> AssociateService(Guid professionalId, Guid serviceId, AssociateServiceRequest request, CancellationToken cancellationToken)
-    {
-        var tenantId = RequireTenant();
-        var professionalExists = await db.Professionals.AnyAsync(x => x.Id == professionalId && x.TenantId == tenantId, cancellationToken);
-        var serviceExists = await db.Services.AnyAsync(x => x.Id == serviceId && x.TenantId == tenantId, cancellationToken);
-        if (!professionalExists || !serviceExists) return NotFound();
-        var link = await db.ProfessionalServices.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.ServiceId == serviceId, cancellationToken);
-        if (link is null) { link = new ProfessionalService(tenantId, professionalId, serviceId, request.DurationOverrideMinutes); db.ProfessionalServices.Add(link); }
-        else { link.SetDurationOverride(request.DurationOverrideMinutes); link.SetActive(true); }
+        if (db.Entry(item).State == EntityState.Detached) db.ServiceSettings.Add(item);
         await db.SaveChangesAsync(cancellationToken);
-        var service = await db.Services.AsNoTracking().SingleAsync(x => x.Id == serviceId, cancellationToken);
-        return Ok(new ProfessionalServiceResponse(link.Id, service.Id, service.Name, link.DurationOverrideMinutes, link.IsActive));
+        return Ok(new ServiceDurationPolicyResponse(serviceId, item.DurationAttributeKey, item.MinutesPerAttributeUnit, item.MinimumDurationMinutes, item.MaximumDurationMinutes, item.DurationRuleVersion));
     }
 
-    [HttpDelete("professionals/{professionalId:guid}/services/{serviceId:guid}")]
+    [HttpPut("professionals/{professionalId:guid}/services/{serviceId:guid}/duration-override")]
     [RequiresPermission("scheduling.manage")]
-    public async Task<IActionResult> DisassociateService(Guid professionalId, Guid serviceId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ProfessionalServiceDurationResponse>> UpdateProfessionalServiceDuration(Guid professionalId, Guid serviceId, ProfessionalServiceDurationRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
-        var link = await db.ProfessionalServices.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.ServiceId == serviceId, cancellationToken);
-        if (link is null) return NotFound();
-        link.SetActive(false); await db.SaveChangesAsync(cancellationToken); return NoContent();
+        if (!await Catalog.IsActiveAssociationAsync(tenantId, professionalId, serviceId, cancellationToken)) return NotFound();
+        var item = await db.ProfessionalServiceSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.ServiceId == serviceId, cancellationToken);
+        try
+        {
+            if (item is null) { item = new ProfessionalServiceSchedulingSettings(tenantId, professionalId, serviceId, request.DurationOverrideMinutes); db.ProfessionalServiceSettings.Add(item); }
+            else item.SetDurationOverride(request.DurationOverrideMinutes);
+        }
+        catch (ArgumentOutOfRangeException exception) { return BadRequest(new { code = "INVALID_DURATION_OVERRIDE", message = exception.Message }); }
+        await db.SaveChangesAsync(cancellationToken);
+        return Ok(new ProfessionalServiceDurationResponse(professionalId, serviceId, item.DurationOverrideMinutes));
     }
 
     [HttpGet("professionals/{professionalId:guid}/availability")]
@@ -124,7 +83,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<AvailabilityRuleResponse>> AddAvailability(Guid professionalId, AvailabilityRuleRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
-        if (!await db.Professionals.AnyAsync(x => x.Id == professionalId && x.TenantId == tenantId, cancellationToken)) return NotFound();
+        if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var overlaps = await db.AvailabilityRules.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.DayOfWeek == request.DayOfWeek && x.IsActive && request.StartsAt < x.EndsAt && request.EndsAt > x.StartsAt, cancellationToken);
         if (overlaps) return Conflict("Availability period overlaps an existing rule.");
         var item = new AvailabilityRule(tenantId, professionalId, request.DayOfWeek, request.StartsAt, request.EndsAt); db.AvailabilityRules.Add(item); await db.SaveChangesAsync(cancellationToken);
@@ -144,7 +103,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<ScheduleBlockResponse>> AddBlock(Guid professionalId, ScheduleBlockRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
-        if (!await db.Professionals.AnyAsync(x => x.Id == professionalId && x.TenantId == tenantId, cancellationToken)) return NotFound();
+        if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var overlaps = await db.ScheduleBlocks.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
         if (overlaps) return Conflict("Schedule block overlaps an existing block.");
         var item = new ScheduleBlock(tenantId, professionalId, request.StartsAtUtc, request.EndsAtUtc, request.Reason); db.ScheduleBlocks.Add(item); await db.SaveChangesAsync(cancellationToken);
@@ -167,7 +126,7 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<AvailabilityExceptionResponse>> AddException(Guid professionalId, AvailabilityExceptionRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
-        if (!await db.Professionals.AnyAsync(x => x.Id == professionalId && x.TenantId == tenantId, cancellationToken)) return NotFound();
+        if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var overlap = await db.AvailabilityExceptions.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.Date == request.Date &&
             ((!request.StartsAt.HasValue && !x.StartsAt.HasValue) ||
              (request.StartsAt.HasValue && x.StartsAt.HasValue && request.StartsAt.Value < x.EndsAt!.Value && request.EndsAt!.Value > x.StartsAt.Value)), cancellationToken);
@@ -212,9 +171,9 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<IReadOnlyCollection<AvailabilitySlotResponse>>> Slots([FromQuery] Guid professionalId, [FromQuery] Guid serviceId, [FromQuery] DateOnly date, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
-        var professional = await db.Professionals.AsNoTracking().SingleOrDefaultAsync(x => x.Id == professionalId && x.TenantId == tenantId && x.IsActive, cancellationToken);
-        var service = await db.Services.AsNoTracking().SingleOrDefaultAsync(x => x.Id == serviceId && x.TenantId == tenantId && x.IsActive, cancellationToken);
-        if (professional is null || service is null) return NotFound();
+        var professional = await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken);
+        var service = await Catalog.FindServiceAsync(tenantId, serviceId, cancellationToken);
+        if (professional is not { IsActive: true } || service is not { IsActive: true }) return NotFound();
         var settings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken) ?? new SchedulingSettings(tenantId);
         var rules = await db.AvailabilityRules.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId).ToArrayAsync(cancellationToken);
         var exceptions = await db.AvailabilityExceptions.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.Date == date).ToArrayAsync(cancellationToken);
@@ -226,8 +185,9 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
             .Select(x => new { x.StartsAtUtc, x.EndsAtUtc })
             .ToArrayAsync(cancellationToken);
         var occupied = appointments.Select(x => (StartsAtUtc: x.StartsAtUtc, EndsAtUtc: x.EndsAtUtc));
+        var capacity = await GetProfessionalCapacityAsync(tenantId, professionalId, settings.DefaultMaxConcurrentAppointments, cancellationToken);
         var slots = slotCalculator.Calculate(date, settings.TimeZoneId, service.DurationMinutes, settings.BufferBeforeMinutes, settings.BufferAfterMinutes, settings.SlotIntervalMinutes, rules, exceptions, blocks, occupied,
-            professional.MaxConcurrentAppointments, settings.ConflictMode);
+            capacity, settings.ConflictMode);
         return Ok(slots.Select(x => new AvailabilitySlotResponse(x.StartsAtUtc, x.EndsAtUtc)).ToArray());
     }
 
@@ -249,9 +209,11 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
         if (request.CustomerId is Guid customerId &&
             (customerReferences is null || !await customerReferences.IsActiveInTenantAsync(tenantId, customerId, cancellationToken)))
             return NotFound(new { code = "CUSTOMER_NOT_FOUND", message = "The requested customer was not found in the current unit." });
-        var validAssociation = await db.ProfessionalServices.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == request.ProfessionalId && x.ServiceId == request.ServiceId && x.IsActive, cancellationToken);
+        var professional = await Catalog.FindProfessionalAsync(tenantId, request.ProfessionalId, cancellationToken);
+        var service = await Catalog.FindServiceAsync(tenantId, request.ServiceId, cancellationToken);
+        if (professional is not { IsActive: true } || service is not { IsActive: true }) return NotFound();
+        var validAssociation = await Catalog.IsActiveAssociationAsync(tenantId, request.ProfessionalId, request.ServiceId, cancellationToken);
         if (!validAssociation) return BadRequest("Professional is not associated with the service.");
-        var service = await db.Services.AsNoTracking().SingleAsync(x => x.Id == request.ServiceId, cancellationToken);
         var tenantSettings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
         var expectedEnd = request.StartsAtUtc.AddMinutes(service.DurationMinutes);
         if (expectedEnd != request.EndsAtUtc) return BadRequest("Appointment end must match the service duration.");
@@ -341,14 +303,14 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
 
     private async Task<AppointmentConflictCheck> EvaluateAppointmentConflictAsync(Guid tenantId, Guid professionalId, DateTime startsAtUtc, DateTime endsAtUtc, ConflictMode? requestedMode, Guid? excludedAppointmentId, CancellationToken cancellationToken)
     {
-        var professional = await db.Professionals.SingleAsync(x => x.Id == professionalId && x.TenantId == tenantId, cancellationToken);
         var settings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
         var conflicts = await db.Appointments.AsNoTracking()
             .Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.Status != AppointmentStatus.Cancelled && x.Id != excludedAppointmentId && startsAtUtc < x.EndsAtUtc && endsAtUtc > x.StartsAtUtc)
             .Select(x => new ConflictAppointmentResponse(x.Id, x.CustomerName, x.StartsAtUtc, x.EndsAtUtc))
             .ToArrayAsync(cancellationToken);
         var blocked = await db.ScheduleBlocks.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && startsAtUtc < x.EndsAtUtc && endsAtUtc > x.StartsAtUtc, cancellationToken);
-        var policy = new CapacityPolicy(professional.MaxConcurrentAppointments, requestedMode ?? settings?.ConflictMode ?? ConflictMode.WarnAndConfirm);
+        var capacity = await GetProfessionalCapacityAsync(tenantId, professionalId, settings?.DefaultMaxConcurrentAppointments ?? 1, cancellationToken);
+        var policy = new CapacityPolicy(capacity, requestedMode ?? settings?.ConflictMode ?? ConflictMode.WarnAndConfirm);
         return new AppointmentConflictCheck(blocked, conflicts, policy);
     }
 
@@ -360,6 +322,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     private static bool ConsumesAppointmentLimit(AppointmentStatus status) => status is AppointmentStatus.Scheduled or AppointmentStatus.Confirmed;
+
+    private IBusinessCatalogReader Catalog => businessCatalog ?? throw new InvalidOperationException("Business catalog reader is required.");
+
+    private async Task<int> GetProfessionalCapacityAsync(Guid tenantId, Guid professionalId, int fallback, CancellationToken cancellationToken) =>
+        (await db.ProfessionalSettings.AsNoTracking().SingleOrDefaultAsync(
+            x => x.TenantId == tenantId && x.ProfessionalId == professionalId, cancellationToken))?.MaxConcurrentAppointments ?? fallback;
 
     private ObjectResult EntitlementConflict(EntitlementLimitDecision decision) => Conflict(new
     {
@@ -380,14 +348,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     private sealed record AppointmentConflictCheck(bool BlockedBySchedule, ConflictAppointmentResponse[] Conflicts, CapacityPolicy Policy);
 }
 
-public sealed record CreateProfessionalRequest(string Name, Guid? UserId, int? MaxConcurrentAppointments = null);
 public sealed record UpdateProfessionalCapacityRequest(int MaxConcurrentAppointments);
-public sealed record ProfessionalResponse(Guid Id, string Name, Guid? UserId, bool IsActive, int MaxConcurrentAppointments);
-public sealed record CreateServiceRequest(string Name, int DurationMinutes, VariableServiceDurationRequest? VariableDuration = null);
+public sealed record ProfessionalCapacityResponse(Guid ProfessionalId, int MaxConcurrentAppointments);
 public sealed record VariableServiceDurationRequest(string AttributeKey, int MinutesPerUnit, int MinimumMinutes, int MaximumMinutes, string Version);
-public sealed record ServiceResponse(Guid Id, string Name, int DurationMinutes, bool IsActive, string? DurationAttributeKey, int? MinutesPerAttributeUnit, int? MinimumDurationMinutes, int? MaximumDurationMinutes, string? DurationRuleVersion);
-public sealed record AssociateServiceRequest(int? DurationOverrideMinutes);
-public sealed record ProfessionalServiceResponse(Guid Id, Guid ServiceId, string Name, int? DurationOverrideMinutes, bool IsActive);
+public sealed record ServiceDurationPolicyResponse(Guid ServiceId, string? AttributeKey, int? MinutesPerUnit, int? MinimumMinutes, int? MaximumMinutes, string? Version);
+public sealed record ProfessionalServiceDurationRequest(int? DurationOverrideMinutes);
+public sealed record ProfessionalServiceDurationResponse(Guid ProfessionalId, Guid ServiceId, int? DurationOverrideMinutes);
 public sealed record AvailabilityRuleRequest(DayOfWeek DayOfWeek, TimeSpan StartsAt, TimeSpan EndsAt);
 public sealed record AvailabilityRuleResponse(Guid Id, DayOfWeek DayOfWeek, TimeSpan StartsAt, TimeSpan EndsAt);
 public sealed record ScheduleBlockRequest(DateTime StartsAtUtc, DateTime EndsAtUtc, string Reason);

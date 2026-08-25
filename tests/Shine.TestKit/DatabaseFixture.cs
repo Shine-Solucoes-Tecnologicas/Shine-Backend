@@ -4,6 +4,7 @@ using Shine.Infrastructure.Persistence;
 using Shine.Infrastructure;
 using Billing.Infrastructure;
 using Scheduling.Infrastructure;
+using BusinessCatalog.Infrastructure;
 using Xunit;
 using Npgsql;
 
@@ -39,6 +40,8 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await billingDb.Database.MigrateAsync();
         await using var schedulingDb = CreateSchedulingDb();
         await schedulingDb.Database.MigrateAsync();
+        await using var businessCatalogDb = CreateBusinessCatalogDb();
+        await businessCatalogDb.Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
@@ -85,6 +88,17 @@ public sealed class DatabaseFixture : IAsyncLifetime
     public SchedulingDbContext CreateUnscopedSchedulingDb() =>
         new(new DbContextOptionsBuilder<SchedulingDbContext>().UseNpgsql(connectionString).Options,
             new UnscopedTenant());
+    public BusinessCatalogDbContext CreateBusinessCatalogDb(ICurrentTenant? currentTenant = null, ITenantExecutionContext? tenantExecutionContext = null)
+    {
+        var effectiveExecutionContext = tenantExecutionContext ?? (currentTenant is null ? new TestBypassContext() : null);
+        return new(new DbContextOptionsBuilder<BusinessCatalogDbContext>().UseNpgsql(connectionString).Options,
+            currentTenant ?? new UnscopedTenant(), effectiveExecutionContext);
+    }
+    public BusinessCatalogDbContext CreateUnscopedBusinessCatalogDb() =>
+        new(new DbContextOptionsBuilder<BusinessCatalogDbContext>().UseNpgsql(connectionString).Options,
+            new UnscopedTenant());
+    public BusinessCatalogReader CreateBusinessCatalogReader(ICurrentTenant? currentTenant = null, ITenantExecutionContext? tenantExecutionContext = null) =>
+        new(CreateBusinessCatalogDb(currentTenant, tenantExecutionContext));
 }
 
 file sealed class UnscopedTenant : ICurrentTenant

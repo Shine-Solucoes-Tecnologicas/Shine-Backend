@@ -17,6 +17,8 @@ public static class AuthorizationSeed
         ["modules.manage"] = "Gerenciar acesso aos módulos",
         ["scheduling.read"] = "Visualizar agenda e disponibilidade",
         ["scheduling.manage"] = "Gerenciar agenda, disponibilidade e agendamentos",
+        ["business-catalog.read"] = "Visualizar profissionais e serviços",
+        ["business-catalog.manage"] = "Gerenciar profissionais, serviços e seus vínculos",
         ["admin.read"] = "Consultar a plataforma administrativamente",
         ["admin.manage"] = "Gerenciar a plataforma administrativamente",
         ["admin.audit"] = "Consultar auditoria administrativa",
@@ -45,8 +47,8 @@ public static class AuthorizationSeed
         {
             [CustomerAccountRole.AdministratorName] = ["account.read", "account.manage", "account.access.manage", "billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
             [CustomerAccountRole.FinancialName] = ["billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
-            [CustomerAccountRole.ViewerName] = ["tenant.read", "scheduling.read", "dashboard.read", "files.read", "customers.read"],
-            [CustomerAccountRole.EditorName] = ["tenant.read", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage", "customers.read", "customers.manage"]
+            [CustomerAccountRole.ViewerName] = ["tenant.read", "business-catalog.read", "scheduling.read", "dashboard.read", "files.read", "customers.read"],
+            [CustomerAccountRole.EditorName] = ["tenant.read", "business-catalog.read", "business-catalog.manage", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage", "customers.read", "customers.manage"]
         };
 
         var existing = await db.CustomerAccountRoles.Where(x => x.AccountId == accountId && definitions.Keys.Contains(x.Name)).ToDictionaryAsync(x => x.Name, StringComparer.Ordinal, cancellationToken);

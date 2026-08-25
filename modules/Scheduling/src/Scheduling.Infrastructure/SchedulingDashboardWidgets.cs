@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Scheduling.Application;
 using Scheduling.Domain;
+using Shine.Application;
 using Shine.Domain;
 
 namespace Scheduling.Infrastructure;
@@ -9,6 +10,7 @@ internal enum SchedulingWidgetKind { NextAppointments, AverageOccupancy, Busiest
 
 internal sealed class SchedulingDashboardWidgetProvider(
     SchedulingDbContext db,
+    IBusinessCatalogReader catalog,
     AvailabilitySlotCalculator slots,
     SchedulingWidgetKind kind) : IDashboardWidgetProvider
 {
@@ -45,16 +47,20 @@ internal sealed class SchedulingDashboardWidgetProvider(
     {
         var fromUtc = context.FromUtc.UtcDateTime;
         var toUtc = context.ToUtc.UtcDateTime;
-        var items = await (from appointment in db.Appointments.AsNoTracking()
-                           join professional in db.Professionals.AsNoTracking() on appointment.ProfessionalId equals professional.Id
-                           join service in db.Services.AsNoTracking() on appointment.ServiceId equals service.Id
-                           where appointment.TenantId == context.TenantId && appointment.StartsAtUtc >= fromUtc && appointment.StartsAtUtc < toUtc &&
-                                 (appointment.Status == AppointmentStatus.Scheduled || appointment.Status == AppointmentStatus.Confirmed)
-                           orderby appointment.StartsAtUtc, appointment.Id
-                           select new SchedulingAppointmentWidgetItem(appointment.Id, appointment.CustomerName,
-                               professional.Id, professional.Name, service.Id, service.Name, appointment.StartsAtUtc,
-                               appointment.EndsAtUtc, appointment.Status.ToString()))
+        var appointments = await db.Appointments.AsNoTracking()
+            .Where(appointment => appointment.TenantId == context.TenantId && appointment.StartsAtUtc >= fromUtc && appointment.StartsAtUtc < toUtc &&
+                                  (appointment.Status == AppointmentStatus.Scheduled || appointment.Status == AppointmentStatus.Confirmed))
+            .OrderBy(appointment => appointment.StartsAtUtc).ThenBy(appointment => appointment.Id)
             .Take(10).ToArrayAsync(cancellationToken);
+        var professionals = (await catalog.FindProfessionalsAsync(context.TenantId, appointments.Select(x => x.ProfessionalId).Distinct().ToArray(), cancellationToken))
+            .ToDictionary(x => x.Id);
+        var services = (await catalog.FindServicesAsync(context.TenantId, appointments.Select(x => x.ServiceId).Distinct().ToArray(), cancellationToken))
+            .ToDictionary(x => x.Id);
+        var items = appointments.Select(appointment => new SchedulingAppointmentWidgetItem(appointment.Id, appointment.CustomerName,
+                appointment.ProfessionalId, professionals.GetValueOrDefault(appointment.ProfessionalId)?.Name ?? "Profissional indisponível",
+                appointment.ServiceId, services.GetValueOrDefault(appointment.ServiceId)?.Name ?? "Serviço indisponível",
+                appointment.StartsAtUtc, appointment.EndsAtUtc, appointment.Status.ToString()))
+            .ToArray();
         return Data(new Dictionary<string, object?> { ["items"] = items, ["count"] = items.Length, ["limit"] = 10 });
     }
 
@@ -65,8 +71,11 @@ internal sealed class SchedulingDashboardWidgetProvider(
         var settings = await db.SchedulingSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == context.TenantId, cancellationToken);
         var timeZoneId = settings?.TimeZoneId ?? "America/Sao_Paulo";
         var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-        var professionals = await db.Professionals.AsNoTracking().Where(x => x.TenantId == context.TenantId && x.IsActive).ToArrayAsync(cancellationToken);
+        var professionals = await catalog.ListActiveProfessionalsAsync(context.TenantId, cancellationToken);
         var professionalIds = professionals.Select(x => x.Id).ToArray();
+        var professionalSettings = await db.ProfessionalSettings.AsNoTracking()
+            .Where(x => x.TenantId == context.TenantId && professionalIds.Contains(x.ProfessionalId))
+            .ToDictionaryAsync(x => x.ProfessionalId, x => x.MaxConcurrentAppointments, cancellationToken);
         var rules = await db.AvailabilityRules.AsNoTracking().Where(x => x.TenantId == context.TenantId && professionalIds.Contains(x.ProfessionalId)).ToArrayAsync(cancellationToken);
         var exceptions = await db.AvailabilityExceptions.AsNoTracking().Where(x => x.TenantId == context.TenantId && professionalIds.Contains(x.ProfessionalId)).ToArrayAsync(cancellationToken);
         var blocks = await db.ScheduleBlocks.AsNoTracking().Where(x => x.TenantId == context.TenantId && professionalIds.Contains(x.ProfessionalId) && x.EndsAtUtc > fromUtc && x.StartsAtUtc < toUtc).ToArrayAsync(cancellationToken);
@@ -83,7 +92,8 @@ internal sealed class SchedulingDashboardWidgetProvider(
                 exceptions.Where(x => x.ProfessionalId == professional.Id),
                 blocks.Where(x => x.ProfessionalId == professional.Id));
             capacityMinutes += available.Where(x => x.EndsAtUtc > fromUtc && x.StartsAtUtc < toUtc)
-                .Sum(x => (long)(x.EndsAtUtc - x.StartsAtUtc).TotalMinutes) * professional.MaxConcurrentAppointments;
+                .Sum(x => (long)(x.EndsAtUtc - x.StartsAtUtc).TotalMinutes) *
+                professionalSettings.GetValueOrDefault(professional.Id, settings?.DefaultMaxConcurrentAppointments ?? 1);
         }
 
         var bookedMinutes = appointments.Sum(x => Math.Max(0L,

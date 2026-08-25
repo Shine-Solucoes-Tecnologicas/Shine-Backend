@@ -1,64 +1,5 @@
 namespace Scheduling.Domain;
 
-public sealed class Professional
-{
-    private Professional() { }
-    public Professional(Guid tenantId, string name, Guid? userId = null, int maxConcurrentAppointments = 1) { TenantId = tenantId; Name = Required(name, nameof(name)); UserId = userId; SetMaxConcurrentAppointments(maxConcurrentAppointments); }
-    public Guid Id { get; private set; } = Guid.NewGuid();
-    public Guid TenantId { get; private set; }
-    public Guid? UserId { get; private set; }
-    public string Name { get; private set; } = null!;
-    public bool IsActive { get; private set; } = true;
-    public int MaxConcurrentAppointments { get; private set; } = 1;
-    public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
-    public void Rename(string name) => Name = Required(name, nameof(name));
-    public void SetActive(bool active) => IsActive = active;
-    public void SetMaxConcurrentAppointments(int value) { if (value <= 0 || value > 100) throw new ArgumentOutOfRangeException(nameof(value)); MaxConcurrentAppointments = value; }
-    private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Value is required.", name) : value.Trim();
-}
-
-public sealed class Service
-{
-    private Service() { }
-    public Service(Guid tenantId, string name, int durationMinutes) { TenantId = tenantId; Name = Required(name, nameof(name)); SetDuration(durationMinutes); }
-    public Guid Id { get; private set; } = Guid.NewGuid();
-    public Guid TenantId { get; private set; }
-    public string Name { get; private set; } = null!;
-    public int DurationMinutes { get; private set; }
-    public string? DurationAttributeKey { get; private set; }
-    public int? MinutesPerAttributeUnit { get; private set; }
-    public int? MinimumDurationMinutes { get; private set; }
-    public int? MaximumDurationMinutes { get; private set; }
-    public string? DurationRuleVersion { get; private set; }
-    public bool IsActive { get; private set; } = true;
-    public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
-    public void Rename(string name) => Name = Required(name, nameof(name));
-    public void SetDuration(int durationMinutes) { if (durationMinutes <= 0 || durationMinutes > 1440) throw new ArgumentOutOfRangeException(nameof(durationMinutes)); DurationMinutes = durationMinutes; }
-    public void ConfigureVariableDuration(string attributeKey, int minutesPerUnit, int minimumMinutes, int maximumMinutes, string version)
-    {
-        var policy = new ServiceDurationPolicy(attributeKey.Trim(), minutesPerUnit, minimumMinutes, maximumMinutes, version.Trim()).Validate();
-        DurationAttributeKey = policy.AttributeKey; MinutesPerAttributeUnit = policy.MinutesPerUnit; MinimumDurationMinutes = policy.MinimumMinutes; MaximumDurationMinutes = policy.MaximumMinutes; DurationRuleVersion = policy.Version;
-    }
-    public void UseFixedDuration() { DurationAttributeKey = null; MinutesPerAttributeUnit = null; MinimumDurationMinutes = null; MaximumDurationMinutes = null; DurationRuleVersion = null; }
-    public ServiceDurationPolicy? GetDurationPolicy() => DurationAttributeKey is null ? null : new ServiceDurationPolicy(DurationAttributeKey, MinutesPerAttributeUnit!.Value, MinimumDurationMinutes!.Value, MaximumDurationMinutes!.Value, DurationRuleVersion!).Validate();
-    public void SetActive(bool active) => IsActive = active;
-    private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Value is required.", name) : value.Trim();
-}
-
-public sealed class ProfessionalService
-{
-    private ProfessionalService() { }
-    public ProfessionalService(Guid tenantId, Guid professionalId, Guid serviceId, int? durationOverrideMinutes = null) { TenantId = tenantId; ProfessionalId = professionalId; ServiceId = serviceId; SetDurationOverride(durationOverrideMinutes); }
-    public Guid Id { get; private set; } = Guid.NewGuid();
-    public Guid TenantId { get; private set; }
-    public Guid ProfessionalId { get; private set; }
-    public Guid ServiceId { get; private set; }
-    public int? DurationOverrideMinutes { get; private set; }
-    public bool IsActive { get; private set; } = true;
-    public void SetDurationOverride(int? value) { if (value is <= 0 or > 1440) throw new ArgumentOutOfRangeException(nameof(value)); DurationOverrideMinutes = value; }
-    public void SetActive(bool active) => IsActive = active;
-}
-
 public sealed class AvailabilityRule
 {
     private AvailabilityRule() { }
@@ -114,6 +55,87 @@ public sealed class SchedulingSettings
     public Shine.Domain.ConflictMode ConflictMode { get; private set; } = Shine.Domain.ConflictMode.WarnAndConfirm;
     public int DefaultMaxConcurrentAppointments { get; private set; } = 1;
     public void Update(int slotIntervalMinutes, int bufferBeforeMinutes, int bufferAfterMinutes, string timeZoneId, Shine.Domain.ConflictMode conflictMode = Shine.Domain.ConflictMode.WarnAndConfirm, int defaultMaxConcurrentAppointments = 1) { var normalizedTimeZoneId = timeZoneId?.Trim(); if (slotIntervalMinutes <= 0 || slotIntervalMinutes > 120 || bufferBeforeMinutes < 0 || bufferAfterMinutes < 0 || string.IsNullOrWhiteSpace(normalizedTimeZoneId) || !Enum.IsDefined(conflictMode) || defaultMaxConcurrentAppointments < 1 || defaultMaxConcurrentAppointments > 100) throw new ArgumentException("Scheduling settings are invalid."); try { TimeZoneInfo.FindSystemTimeZoneById(normalizedTimeZoneId); } catch (TimeZoneNotFoundException) { throw new ArgumentException("Scheduling time zone is invalid.", nameof(timeZoneId)); } catch (InvalidTimeZoneException) { throw new ArgumentException("Scheduling time zone is invalid.", nameof(timeZoneId)); } SlotIntervalMinutes = slotIntervalMinutes; BufferBeforeMinutes = bufferBeforeMinutes; BufferAfterMinutes = bufferAfterMinutes; TimeZoneId = normalizedTimeZoneId; ConflictMode = conflictMode; DefaultMaxConcurrentAppointments = defaultMaxConcurrentAppointments; }
+}
+
+public sealed class ProfessionalSchedulingSettings
+{
+    private ProfessionalSchedulingSettings() { }
+    public ProfessionalSchedulingSettings(Guid tenantId, Guid professionalId, int maxConcurrentAppointments = 1)
+    {
+        if (tenantId == Guid.Empty || professionalId == Guid.Empty) throw new ArgumentException("Unit and professional identifiers are required.");
+        TenantId = tenantId;
+        ProfessionalId = professionalId;
+        SetCapacity(maxConcurrentAppointments);
+    }
+    public Guid TenantId { get; private set; }
+    public Guid ProfessionalId { get; private set; }
+    public int MaxConcurrentAppointments { get; private set; } = 1;
+    public void SetCapacity(int value)
+    {
+        if (value is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(value));
+        MaxConcurrentAppointments = value;
+    }
+}
+
+public sealed class ServiceSchedulingSettings
+{
+    private ServiceSchedulingSettings() { }
+    public ServiceSchedulingSettings(Guid tenantId, Guid serviceId)
+    {
+        if (tenantId == Guid.Empty || serviceId == Guid.Empty) throw new ArgumentException("Unit and service identifiers are required.");
+        TenantId = tenantId;
+        ServiceId = serviceId;
+    }
+    public Guid TenantId { get; private set; }
+    public Guid ServiceId { get; private set; }
+    public string? DurationAttributeKey { get; private set; }
+    public int? MinutesPerAttributeUnit { get; private set; }
+    public int? MinimumDurationMinutes { get; private set; }
+    public int? MaximumDurationMinutes { get; private set; }
+    public string? DurationRuleVersion { get; private set; }
+    public void ConfigureVariableDuration(string attributeKey, int minutesPerUnit, int minimumMinutes, int maximumMinutes, string version)
+    {
+        var key = Required(attributeKey, nameof(attributeKey));
+        var ruleVersion = Required(version, nameof(version));
+        if (minutesPerUnit <= 0 || minimumMinutes <= 0 || maximumMinutes < minimumMinutes || maximumMinutes > 1440)
+            throw new ArgumentException("Variable duration policy is invalid.");
+        DurationAttributeKey = key;
+        MinutesPerAttributeUnit = minutesPerUnit;
+        MinimumDurationMinutes = minimumMinutes;
+        MaximumDurationMinutes = maximumMinutes;
+        DurationRuleVersion = ruleVersion;
+    }
+    public void UseFixedDuration()
+    {
+        DurationAttributeKey = null;
+        MinutesPerAttributeUnit = null;
+        MinimumDurationMinutes = null;
+        MaximumDurationMinutes = null;
+        DurationRuleVersion = null;
+    }
+    private static string Required(string value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Value is required.", name) : value.Trim();
+}
+
+public sealed class ProfessionalServiceSchedulingSettings
+{
+    private ProfessionalServiceSchedulingSettings() { }
+    public ProfessionalServiceSchedulingSettings(Guid tenantId, Guid professionalId, Guid serviceId, int? durationOverrideMinutes = null)
+    {
+        if (tenantId == Guid.Empty || professionalId == Guid.Empty || serviceId == Guid.Empty) throw new ArgumentException("Unit, professional and service identifiers are required.");
+        TenantId = tenantId;
+        ProfessionalId = professionalId;
+        ServiceId = serviceId;
+        SetDurationOverride(durationOverrideMinutes);
+    }
+    public Guid TenantId { get; private set; }
+    public Guid ProfessionalId { get; private set; }
+    public Guid ServiceId { get; private set; }
+    public int? DurationOverrideMinutes { get; private set; }
+    public void SetDurationOverride(int? value)
+    {
+        if (value is <= 0 or > 1440) throw new ArgumentOutOfRangeException(nameof(value));
+        DurationOverrideMinutes = value;
+    }
 }
 
 public enum AppointmentStatus { Scheduled, Confirmed, Completed, Cancelled, NoShow }
