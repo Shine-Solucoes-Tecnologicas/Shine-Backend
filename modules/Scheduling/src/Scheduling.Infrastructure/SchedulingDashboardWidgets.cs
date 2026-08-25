@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using BusinessCatalog.Application;
 using Scheduling.Application;
 using Scheduling.Domain;
 using Shine.Application;

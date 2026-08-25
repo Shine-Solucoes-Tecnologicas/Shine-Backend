@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\BusinessCatalog.Application\BusinessCatalog.Application.csproj" />
     <ProjectReference Include="..\BusinessCatalog.Domain\BusinessCatalog.Domain.csproj" />
     <ProjectReference Include="..\..\..\..\platform\Core\src\Shine.Infrastructure\Shine.Infrastructure.csproj" />
   </ItemGroup>

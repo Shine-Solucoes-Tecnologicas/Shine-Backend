@@ -1,4 +1,4 @@
-namespace Shine.Application;
+namespace BusinessCatalog.Application;
 
 public sealed record ProfessionalCatalogEntry(Guid Id, string Name, bool IsActive);
 

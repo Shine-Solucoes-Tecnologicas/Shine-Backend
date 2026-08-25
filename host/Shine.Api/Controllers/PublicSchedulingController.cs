@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
+using BusinessCatalog.Application;
 using System.Data;
 using Scheduling.Application;
 using Scheduling.Domain;

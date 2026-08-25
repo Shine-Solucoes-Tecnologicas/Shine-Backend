@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using Shine.Application;
+using BusinessCatalog.Application;
 
 namespace BusinessCatalog.Infrastructure;
 

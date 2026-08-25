@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BusinessCatalog.Application;
 using Scheduling.Domain;
 using Scheduling.Infrastructure;
 using Scheduling.Application;

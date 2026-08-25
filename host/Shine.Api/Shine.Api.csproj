@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\modules\BusinessCatalog\src\BusinessCatalog.Infrastructure\BusinessCatalog.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\BusinessCatalog\src\BusinessCatalog.Application\BusinessCatalog.Application.csproj" />
     <ProjectReference Include="..\..\platform\Core\src\Shine.Application\Shine.Application.csproj" />
     <ProjectReference Include="..\..\modules\Billing\src\Billing.Infrastructure\Billing.Infrastructure.csproj" />
     <ProjectReference Include="..\..\platform\Core\src\Shine.Infrastructure\Shine.Infrastructure.csproj" />
