@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Swashbuckle.AspNetCore.Swagger;
 
 namespace Shine.Core.IntegrationTests;
 
@@ -14,6 +15,8 @@ public sealed class OpenApiContractTests
     public async Task Document_describes_routes_models_errors_pagination_and_bearer_security()
     {
         using var factory = new ApiFactory("Development");
+        using var scope = factory.Services.CreateScope();
+        _ = scope.ServiceProvider.GetRequiredService<ISwaggerProvider>().GetSwagger("v1");
         using var client = factory.CreateClient();
 
         using var response = await client.GetAsync("/openapi/v1.json");

@@ -41,6 +41,7 @@ A imagem usa runtime sem SDK, executa com usuário não-root, expõe somente a p
 
 Consulte [docs/configuration.md](docs/configuration.md) para a configuração por ambiente.
 O contrato técnico de módulos e limites está em [docs/entitlements.md](docs/entitlements.md).
+As convenções de consumo e o inventário da API estão em [docs/api/README.md](docs/api/README.md).
 O checklist de produção e as responsabilidades de rotação estão em [docs/deployment-security.md](docs/deployment-security.md).
 As verificações automatizadas e a política de exceções estão em [docs/security-ci.md](docs/security-ci.md).
 O contrato OpenAPI e sua política de compatibilidade estão em [docs/openapi.md](docs/openapi.md).

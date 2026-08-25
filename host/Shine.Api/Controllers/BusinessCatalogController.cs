@@ -21,6 +21,7 @@ public sealed class BusinessCatalogController(
     ICurrentTenant currentTenant,
     IUserUnitReferenceValidator userReferences) : ControllerBase, IActionFilter
 {
+    [NonAction]
     public void OnActionExecuting(ActionExecutingContext context)
     {
         if (Request.Path.StartsWithSegments("/api/business-catalog"))
@@ -29,6 +30,8 @@ public sealed class BusinessCatalogController(
             Response.Headers.Link = "</api/v1/business-catalog>; rel=\"successor-version\"";
         }
     }
+
+    [NonAction]
     public void OnActionExecuted(ActionExecutedContext context) { }
 
     [HttpGet("professionals")]
