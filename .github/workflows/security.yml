@@ -21,7 +21,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-      security-events: write
       packages: read
 
     steps:
@@ -50,6 +49,12 @@ jobs:
         uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           category: /language:csharp
+          output: ${{ runner.temp }}/codeql-results
+          upload: never
+
+      - name: Enforce blocking CodeQL findings
+        shell: pwsh
+        run: ./scripts/Test-CodeQlSarif.ps1 -Path "${{ runner.temp }}/codeql-results"
 
   dependencies-and-secrets:
     name: Dependencies and secrets
