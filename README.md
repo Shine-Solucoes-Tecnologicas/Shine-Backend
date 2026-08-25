@@ -44,4 +44,10 @@ O contrato técnico de módulos e limites está em [docs/entitlements.md](docs/e
 O checklist de produção e as responsabilidades de rotação estão em [docs/deployment-security.md](docs/deployment-security.md).
 As verificações automatizadas e a política de exceções estão em [docs/security-ci.md](docs/security-ci.md).
 
+## Contribuição e licença
+
+O fluxo de branches, Pull Requests, revisão e validação está em [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Este é um projeto proprietário da Shine Soluções Tecnológicas. Consulte [LICENSE](LICENSE) para os termos aplicáveis.
+
 Valide a API em `GET /health`.
