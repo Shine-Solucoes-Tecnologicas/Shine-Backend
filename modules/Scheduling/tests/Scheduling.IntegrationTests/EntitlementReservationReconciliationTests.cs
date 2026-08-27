@@ -28,7 +28,7 @@ public sealed class EntitlementReservationReconciliationTests(DatabaseFixture fi
             await catalogDb.SaveChangesAsync();
         }
         var guard = new EntitlementLimitGuard(coreDb, new FixedEntitlements(10));
-        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new ThrowingPublisher(), new NoOpLogWriter(), guard, businessCatalog: fixture.CreateBusinessCatalogReader(currentTenant));
+        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new ThrowingPublisher(), new NoOpLogWriter(), guard, new AllowAllSchedulingScopeAuthorization(), businessCatalog: fixture.CreateBusinessCatalogReader(currentTenant));
         var startsAt = DateTime.UtcNow.AddDays(1);
 
         await Assert.ThrowsAsync<InjectedSchedulingFailure>(() => controller.CreateAppointment(
@@ -132,7 +132,7 @@ public sealed class EntitlementReservationReconciliationTests(DatabaseFixture fi
         Assert.True((await guard.TryReserveAsync(tenantId, EntitlementKeys.SchedulingActiveAppointments, appointment.Id)).Allowed);
         schedulingDb.Appointments.Add(appointment);
         await schedulingDb.SaveChangesAsync();
-        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new NoOpPublisher(), new NoOpLogWriter(), new FailingReleaseGuard(guard), businessCatalog: fixture.CreateBusinessCatalogReader(currentTenant));
+        var controller = new SchedulingController(schedulingDb, currentTenant, new AvailabilitySlotCalculator(), new NoOpPublisher(), new NoOpLogWriter(), new FailingReleaseGuard(guard), new AllowAllSchedulingScopeAuthorization(), businessCatalog: fixture.CreateBusinessCatalogReader(currentTenant));
 
         await Assert.ThrowsAsync<InjectedSchedulingFailure>(() => controller.ChangeAppointmentStatus(
             appointment.Id,
@@ -256,6 +256,15 @@ public sealed class EntitlementReservationReconciliationTests(DatabaseFixture fi
     private sealed class NoOpPublisher : IAppointmentEventPublisher
     {
         public Task PublishAsync(AppointmentEvent appointmentEvent, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class AllowAllSchedulingScopeAuthorization : ISchedulingScopeAuthorization
+    {
+        public Task<SchedulingScopeDecision> AuthorizeAsync(string permissionCode, Guid? requestedProfessionalId = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(new SchedulingScopeDecision(
+                SchedulingScopeDecisionStatus.Allowed, Shine.Domain.Authorization.PermissionScope.All, requestedProfessionalId));
+        public Task<SchedulingScopeDecision> AuthorizeAllAsync(string permissionCode, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new SchedulingScopeDecision(SchedulingScopeDecisionStatus.Allowed, Shine.Domain.Authorization.PermissionScope.All));
     }
 
     private sealed class FailingReleaseGuard(IEntitlementLimitGuard inner) : IEntitlementLimitGuard

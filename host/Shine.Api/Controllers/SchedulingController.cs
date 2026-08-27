@@ -16,13 +16,15 @@ namespace Shine.Api.Controllers;
 [Authorize]
 [RequiresModule("SCHEDULING")]
 [Route("api/scheduling")]
-public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter, IEntitlementLimitGuard entitlementLimits, ICustomerReferenceValidator? customerReferences = null, IBusinessCatalogReader? businessCatalog = null) : ControllerBase
+public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant currentTenant, AvailabilitySlotCalculator slotCalculator, IAppointmentEventPublisher eventPublisher, IOperationalLogWriter operationalLogWriter, IEntitlementLimitGuard entitlementLimits, ISchedulingScopeAuthorization scopeAuthorization, ICustomerReferenceValidator? customerReferences = null, IBusinessCatalogReader? businessCatalog = null) : ControllerBase
 {
     [HttpPut("professionals/{professionalId:guid}/capacity")]
-    [RequiresPermission("scheduling.manage")]
+    [RequiresPermission("scheduling.configure")]
     public async Task<ActionResult<ProfessionalCapacityResponse>> UpdateProfessionalCapacity(Guid professionalId, UpdateProfessionalCapacityRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAllAsync("scheduling.configure", cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var item = await db.ProfessionalSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId, cancellationToken);
         try
@@ -36,10 +38,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpPut("services/{serviceId:guid}/duration-policy")]
-    [RequiresPermission("scheduling.manage")]
+    [RequiresPermission("scheduling.configure")]
     public async Task<ActionResult<ServiceDurationPolicyResponse>> UpdateServiceDurationPolicy(Guid serviceId, VariableServiceDurationRequest? request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAllAsync("scheduling.configure", cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (await Catalog.FindServiceAsync(tenantId, serviceId, cancellationToken) is null) return NotFound();
         var item = await db.ServiceSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ServiceId == serviceId, cancellationToken);
         item ??= new ServiceSchedulingSettings(tenantId, serviceId);
@@ -55,10 +59,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpPut("professionals/{professionalId:guid}/services/{serviceId:guid}/duration-override")]
-    [RequiresPermission("scheduling.manage")]
+    [RequiresPermission("scheduling.configure")]
     public async Task<ActionResult<ProfessionalServiceDurationResponse>> UpdateProfessionalServiceDuration(Guid professionalId, Guid serviceId, ProfessionalServiceDurationRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAllAsync("scheduling.configure", cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (!await Catalog.IsActiveAssociationAsync(tenantId, professionalId, serviceId, cancellationToken)) return NotFound();
         var item = await db.ProfessionalServiceSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.ServiceId == serviceId, cancellationToken);
         try
@@ -72,18 +78,23 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpGet("professionals/{professionalId:guid}/availability")]
+    [RequiresPermission("scheduling.read")]
     public async Task<ActionResult<IReadOnlyCollection<AvailabilityRuleResponse>>> Availability(Guid professionalId, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.read", professionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         var items = await db.AvailabilityRules.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.IsActive).OrderBy(x => x.DayOfWeek).ThenBy(x => x.StartsAt).Select(x => new AvailabilityRuleResponse(x.Id, x.DayOfWeek, x.StartsAt, x.EndsAt)).ToArrayAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpPost("professionals/{professionalId:guid}/availability")]
-    [RequiresPermission("scheduling.manage")]
+    [SchedulingAccess("scheduling.configure all or scheduling.manage own")]
     public async Task<ActionResult<AvailabilityRuleResponse>> AddAvailability(Guid professionalId, AvailabilityRuleRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await AuthorizeRecurringAvailabilityAsync(professionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var overlaps = await db.AvailabilityRules.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.DayOfWeek == request.DayOfWeek && x.IsActive && request.StartsAt < x.EndsAt && request.EndsAt > x.StartsAt, cancellationToken);
         if (overlaps) return Conflict("Availability period overlaps an existing rule.");
@@ -92,10 +103,14 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpDelete("availability/{ruleId:guid}")]
-    [RequiresPermission("scheduling.manage")]
+    [SchedulingAccess("scheduling.configure all or scheduling.manage own")]
     public async Task<IActionResult> RemoveAvailability(Guid ruleId, CancellationToken cancellationToken)
     {
-        var item = await db.AvailabilityRules.SingleOrDefaultAsync(x => x.Id == ruleId && x.TenantId == RequireTenant(), cancellationToken);
+        var access = await AuthorizeRecurringAvailabilityAsync(null, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
+        var tenantId = RequireTenant();
+        var item = await db.AvailabilityRules.SingleOrDefaultAsync(x => x.Id == ruleId && x.TenantId == tenantId &&
+            (access.ProfessionalId == null || x.ProfessionalId == access.ProfessionalId), cancellationToken);
         if (item is null) return NotFound(); item.SetActive(false); await db.SaveChangesAsync(cancellationToken); return NoContent();
     }
 
@@ -104,6 +119,8 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<ScheduleBlockResponse>> AddBlock(Guid professionalId, ScheduleBlockRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.manage", professionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var overlaps = await db.ScheduleBlocks.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && request.StartsAtUtc < x.EndsAtUtc && request.EndsAtUtc > x.StartsAtUtc, cancellationToken);
         if (overlaps) return Conflict("Schedule block overlaps an existing block.");
@@ -112,9 +129,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpGet("professionals/{professionalId:guid}/availability-exceptions")]
+    [RequiresPermission("scheduling.read")]
     public async Task<ActionResult<IReadOnlyCollection<AvailabilityExceptionResponse>>> Exceptions(Guid professionalId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.read", professionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         var query = db.AvailabilityExceptions.AsNoTracking().Where(x => x.TenantId == tenantId && x.ProfessionalId == professionalId);
         if (from is not null) query = query.Where(x => x.Date >= from.Value);
         if (to is not null) query = query.Where(x => x.Date <= to.Value);
@@ -127,6 +147,8 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<AvailabilityExceptionResponse>> AddException(Guid professionalId, AvailabilityExceptionRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.manage", professionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken) is null) return NotFound();
         var overlap = await db.AvailabilityExceptions.AnyAsync(x => x.TenantId == tenantId && x.ProfessionalId == professionalId && x.Date == request.Date &&
             ((!request.StartsAt.HasValue && !x.StartsAt.HasValue) ||
@@ -141,11 +163,16 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     [RequiresPermission("scheduling.manage")]
     public async Task<IActionResult> RemoveException(Guid exceptionId, CancellationToken cancellationToken)
     {
-        var item = await db.AvailabilityExceptions.SingleOrDefaultAsync(x => x.Id == exceptionId && x.TenantId == RequireTenant(), cancellationToken);
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.manage", cancellationToken: cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
+        var tenantId = RequireTenant();
+        var item = await db.AvailabilityExceptions.SingleOrDefaultAsync(x => x.Id == exceptionId && x.TenantId == tenantId &&
+            (access.ProfessionalId == null || x.ProfessionalId == access.ProfessionalId), cancellationToken);
         if (item is null) return NotFound(); db.AvailabilityExceptions.Remove(item); await db.SaveChangesAsync(cancellationToken); return NoContent();
     }
 
     [HttpGet("settings")]
+    [RequiresPermission("scheduling.read")]
     public async Task<ActionResult<SchedulingSettingsResponse>> GetSettings(CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
@@ -155,10 +182,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpPut("settings")]
-    [RequiresPermission("scheduling.manage")]
+    [RequiresPermission("scheduling.configure")]
     public async Task<ActionResult<SchedulingSettingsResponse>> UpdateSettings(SchedulingSettingsRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAllAsync("scheduling.configure", cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         var item = await db.SchedulingSettings.SingleOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
         if (item is null) { item = new SchedulingSettings(tenantId); db.SchedulingSettings.Add(item); }
         try { item.Update(request.SlotIntervalMinutes, request.BufferBeforeMinutes, request.BufferAfterMinutes, request.TimeZoneId, request.ConflictMode, request.DefaultMaxConcurrentAppointments); }
@@ -169,9 +198,12 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpGet("availability/slots")]
+    [RequiresPermission("scheduling.read")]
     public async Task<ActionResult<IReadOnlyCollection<AvailabilitySlotResponse>>> Slots([FromQuery] Guid professionalId, [FromQuery] Guid serviceId, [FromQuery] DateOnly date, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.read", professionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         var professional = await Catalog.FindProfessionalAsync(tenantId, professionalId, cancellationToken);
         var service = await Catalog.FindServiceAsync(tenantId, serviceId, cancellationToken);
         if (professional is not { IsActive: true } || service is not { IsActive: true }) return NotFound();
@@ -193,10 +225,14 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     [HttpGet("appointments")]
+    [RequiresPermission("scheduling.read")]
     public async Task<ActionResult<PagedResponse<AppointmentResponse>>> Appointments([FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc, [FromQuery] PagedRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.read", cancellationToken: cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         var query = db.Appointments.AsNoTracking().Where(x => x.TenantId == tenantId && x.StartsAtUtc < toUtc && x.EndsAtUtc > fromUtc);
+        if (access.ProfessionalId is Guid professionalId) query = query.Where(x => x.ProfessionalId == professionalId);
         var total = await query.CountAsync(cancellationToken);
         var items = await query.OrderBy(x => x.StartsAtUtc).Skip((request.ValidatedPage - 1) * request.ValidatedPageSize).Take(request.ValidatedPageSize).Select(x => new AppointmentResponse(x.Id, x.ProfessionalId, x.ServiceId, x.CustomerName, x.CustomerContact, x.StartsAtUtc, x.EndsAtUtc, x.Status, x.Version, x.CustomerId)).ToArrayAsync(cancellationToken);
         return Ok(PagedResponse<AppointmentResponse>.Create(items, request.ValidatedPage, request.ValidatedPageSize, total));
@@ -207,6 +243,8 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<AppointmentResponse>> CreateAppointment(CreateAppointmentRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.manage", request.ProfessionalId, cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         if (request.CustomerId is Guid customerId &&
             (customerReferences is null || !await customerReferences.IsActiveInTenantAsync(tenantId, customerId, cancellationToken)))
             return NotFound(new { code = "CUSTOMER_NOT_FOUND", message = "The requested customer was not found in the current unit." });
@@ -248,7 +286,11 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     [RequiresPermission("scheduling.manage")]
     public async Task<IActionResult> ChangeAppointmentStatus(Guid appointmentId, ChangeAppointmentStatusRequest request, CancellationToken cancellationToken)
     {
-        var item = await db.Appointments.SingleOrDefaultAsync(x => x.Id == appointmentId && x.TenantId == RequireTenant(), cancellationToken);
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.manage", cancellationToken: cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
+        var tenantId = RequireTenant();
+        var item = await db.Appointments.SingleOrDefaultAsync(x => x.Id == appointmentId && x.TenantId == tenantId &&
+            (access.ProfessionalId == null || x.ProfessionalId == access.ProfessionalId), cancellationToken);
         if (item is null) return NotFound();
         var previousStatus = item.Status;
         EntitlementLimitDecision? reservation = null;
@@ -280,8 +322,11 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     public async Task<ActionResult<AppointmentResponse>> RescheduleAppointment(Guid appointmentId, RescheduleAppointmentRequest request, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant();
+        var access = await scopeAuthorization.AuthorizeAsync("scheduling.manage", cancellationToken: cancellationToken);
+        if (!access.Allowed) return SchedulingDenied(access);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
-        var item = await db.Appointments.SingleOrDefaultAsync(x => x.Id == appointmentId && x.TenantId == tenantId, cancellationToken);
+        var item = await db.Appointments.SingleOrDefaultAsync(x => x.Id == appointmentId && x.TenantId == tenantId &&
+            (access.ProfessionalId == null || x.ProfessionalId == access.ProfessionalId), cancellationToken);
         if (item is null) return NotFound();
         await LockProfessionalAsync(tenantId, item.ProfessionalId, cancellationToken);
         await db.Entry(item).ReloadAsync(cancellationToken);
@@ -323,6 +368,26 @@ public sealed class SchedulingController(SchedulingDbContext db, ICurrentTenant 
     }
 
     private static bool ConsumesAppointmentLimit(AppointmentStatus status) => status is AppointmentStatus.Scheduled or AppointmentStatus.Confirmed;
+
+    private async Task<SchedulingScopeDecision> AuthorizeRecurringAvailabilityAsync(Guid? professionalId, CancellationToken cancellationToken)
+    {
+        var configure = await scopeAuthorization.AuthorizeAllAsync("scheduling.configure", cancellationToken);
+        if (configure.Allowed) return configure with { ProfessionalId = professionalId };
+
+        var manage = await scopeAuthorization.AuthorizeAsync("scheduling.manage", professionalId, cancellationToken);
+        if (manage.Allowed && manage.Scope == Shine.Domain.Authorization.PermissionScope.Own) return manage;
+        if (manage.Status == SchedulingScopeDecisionStatus.ProfessionalContextRequired) return manage;
+        if (manage.Status == SchedulingScopeDecisionStatus.Hidden) return manage;
+        return new(SchedulingScopeDecisionStatus.Forbidden);
+    }
+
+    private ActionResult SchedulingDenied(SchedulingScopeDecision decision) => decision.Status switch
+    {
+        SchedulingScopeDecisionStatus.ProfessionalContextRequired => StatusCode(StatusCodes.Status403Forbidden,
+            new { code = "PROFESSIONAL_CONTEXT_REQUIRED", message = "An active professional link is required for this operation." }),
+        SchedulingScopeDecisionStatus.Hidden => NotFound(),
+        _ => Forbid()
+    };
 
     private IBusinessCatalogReader Catalog => businessCatalog ?? throw new InvalidOperationException("Business catalog reader is required.");
 

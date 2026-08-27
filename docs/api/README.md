@@ -8,9 +8,16 @@ Esta pasta organiza a documentação de consumo da API Shine. O contrato OpenAPI
 - Interface interativa em desenvolvimento: `/docs`.
 - Política de compatibilidade e validação: [`../openapi.md`](../openapi.md).
 - Convenções transversais: [`conventions.md`](conventions.md).
+- Administração global: [`administration.md`](administration.md).
+- Identidade, organizações e acesso: [`identity-and-access.md`](identity-and-access.md).
+- Billing e contratos comerciais: [`billing.md`](billing.md).
+- Business Catalog: [`business-catalog.md`](business-catalog.md).
+- Scheduling público e autenticado: [`scheduling.md`](scheduling.md).
+- Capacidades auxiliares: [`auxiliary-capabilities.md`](auxiliary-capabilities.md).
 - Arquitetura modular: [`../architecture.md`](../architecture.md).
 - Autorização administrativa: [`../administrative-authorization.md`](../administrative-authorization.md).
 - Módulos, entitlements e limites: [`../entitlements.md`](../entitlements.md).
+- Integrações, jobs e persistência: [`../runtime-and-operations.md`](../runtime-and-operations.md).
 
 ## Fontes de verdade
 
@@ -61,4 +68,3 @@ Um endpoint está documentado quando o contrato gerado informa corretamente:
 4. Execute `OpenApiContractTests`.
 5. Atualize o guia do domínio quando o significado ou fluxo mudar.
 6. Trate remoções, renomes e novas obrigatoriedades como alterações incompatíveis.
-

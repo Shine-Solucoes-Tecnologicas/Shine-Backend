@@ -45,5 +45,6 @@ As convenções de consumo e o inventário da API estão em [docs/api/README.md]
 O checklist de produção e as responsabilidades de rotação estão em [docs/deployment-security.md](docs/deployment-security.md).
 As verificações automatizadas e a política de exceções estão em [docs/security-ci.md](docs/security-ci.md).
 O contrato OpenAPI e sua política de compatibilidade estão em [docs/openapi.md](docs/openapi.md).
+Integrações internas, workers, persistência e procedimentos operacionais estão em [docs/runtime-and-operations.md](docs/runtime-and-operations.md).
 
 Valide a API em `GET /health`.

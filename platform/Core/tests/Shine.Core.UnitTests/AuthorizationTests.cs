@@ -48,7 +48,17 @@ public sealed class AuthorizationTests
         Assert.Contains("tenant.read", permissions.Keys);
         Assert.Contains("users.manage", permissions.Keys);
         Assert.Contains("roles.manage", permissions.Keys);
+        Assert.Contains("scheduling.configure", permissions.Keys);
         Assert.All(permissions.Keys, code => Assert.Contains('.', code));
+    }
+
+    [Fact]
+    public void Scheduling_roles_have_distinct_system_names_and_scopes_are_cumulative()
+    {
+        Assert.Equal("SchedulingProfessional", CustomerAccountRole.SchedulingProfessionalName);
+        Assert.Equal("SchedulingReception", CustomerAccountRole.SchedulingReceptionName);
+        Assert.Equal("SchedulingManager", CustomerAccountRole.SchedulingManagerName);
+        Assert.True(PermissionScope.All > PermissionScope.Own);
     }
 
     [Fact]

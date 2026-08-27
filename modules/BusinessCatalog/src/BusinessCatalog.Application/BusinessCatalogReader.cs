@@ -11,6 +11,7 @@ public sealed record ServiceCatalogEntry(
 public interface IBusinessCatalogReader
 {
     Task<ProfessionalCatalogEntry?> FindProfessionalAsync(Guid tenantId, Guid professionalId, CancellationToken cancellationToken = default);
+    Task<ProfessionalCatalogEntry?> FindProfessionalByUserAsync(Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<ServiceCatalogEntry?> FindServiceAsync(Guid tenantId, Guid serviceId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<ProfessionalCatalogEntry>> ListActiveProfessionalsAsync(Guid tenantId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<ProfessionalCatalogEntry>> FindProfessionalsAsync(Guid tenantId, IReadOnlyCollection<Guid> professionalIds, CancellationToken cancellationToken = default);

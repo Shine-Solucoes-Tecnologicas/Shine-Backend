@@ -25,6 +25,7 @@ builder.Services.AddHealthChecks()
 builder.Services.AddControllers();
 builder.Services.AddShineOpenApi();
 builder.Services.AddScoped<AppointmentEntitlementReconciliationService>();
+builder.Services.AddScoped<ISchedulingScopeAuthorization, SchedulingScopeAuthorization>();
 builder.Services.AddHostedService<AppointmentEntitlementReconciliationWorker>();
 builder.Services.AddHostedService<StoredFileDeletionWorker>();
 builder.Services.AddApiSecurityConfiguration(builder.Configuration, builder.Environment);

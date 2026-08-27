@@ -67,12 +67,13 @@ public sealed class FilesController(
         try
         {
             if (!Guid.TryParse(id, out var metadataId)) return NotFound();
-            var metadata = await db.StoredFiles.AsNoTracking().SingleOrDefaultAsync(
-                x => x.Id == metadataId && x.DeletionStatus == StoredFileDeletionStatus.Active,
-                cancellationToken);
-            if (metadata is null) return NotFound();
             var userId = RequireUser();
             var tenantId = RequireTenant();
+            var metadata = await db.StoredFiles.AsNoTracking().SingleOrDefaultAsync(
+                x => x.Id == metadataId && x.TenantId == tenantId &&
+                    x.DeletionStatus == StoredFileDeletionStatus.Active,
+                cancellationToken);
+            if (metadata is null) return NotFound();
             if (!await permissions.HasPermissionAsync(userId, tenantId, metadata.ReadPermissionCode, cancellationToken)) return Forbid();
             var content = await storage.OpenReadAsync(metadata.StorageId, cancellationToken);
             return content is null ? NotFound() : File(content, metadata.ContentType, metadata.OriginalFileName, enableRangeProcessing: true);
@@ -90,10 +91,11 @@ public sealed class FilesController(
         try
         {
             if (!Guid.TryParse(id, out var metadataId)) return NotFound();
-            var metadata = await db.StoredFiles.SingleOrDefaultAsync(x => x.Id == metadataId, cancellationToken);
-            if (metadata is null) return NotFound();
             var userId = RequireUser();
             var tenantId = RequireTenant();
+            var metadata = await db.StoredFiles.SingleOrDefaultAsync(
+                x => x.Id == metadataId && x.TenantId == tenantId, cancellationToken);
+            if (metadata is null) return NotFound();
             if (!await permissions.HasPermissionAsync(userId, tenantId, metadata.ManagePermissionCode, cancellationToken)) return Forbid();
             metadata.RequestDeletion(DateTime.UtcNow);
             await db.SaveChangesAsync(cancellationToken);

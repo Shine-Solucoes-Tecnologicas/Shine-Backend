@@ -2,6 +2,12 @@ namespace Shine.Domain.Authorization;
 
 using Shine.Domain.Identity;
 
+public enum PermissionScope
+{
+    Own = 0,
+    All = 1
+}
+
 public sealed class Permission
 {
     private Permission() { }
@@ -37,11 +43,14 @@ public sealed class Role : IMultiTenantEntity
 public sealed class RolePermission
 {
     private RolePermission() { }
-    public RolePermission(Guid roleId, Guid permissionId) { RoleId = roleId; PermissionId = permissionId; }
+    public RolePermission(Guid roleId, Guid permissionId, PermissionScope scope = PermissionScope.All)
+    { RoleId = roleId; PermissionId = permissionId; Scope = scope; }
     public Guid RoleId { get; private set; }
     public Guid PermissionId { get; private set; }
+    public PermissionScope Scope { get; private set; } = PermissionScope.All;
     public Role Role { get; private set; } = null!;
     public Permission Permission { get; private set; } = null!;
+    public void SetScope(PermissionScope scope) => Scope = scope;
 }
 
 public sealed class UserTenantRole : IMultiTenantEntity

@@ -37,11 +37,17 @@ public sealed class FileAuthorizationIntegrationTests(DatabaseFixture fixture)
                 var crossTenant = new FilesController(storage, dbB, new TestUser(Guid.NewGuid()), tenant, new TestPermissions(true),
                     new StoredFileDeletionProcessor(dbB, storage, new TenantExecutionContext(tenant)));
                 Assert.IsType<NotFoundResult>(await crossTenant.Download(fileId.ToString(), default));
+                Assert.IsType<NotFoundResult>(await crossTenant.Delete(fileId.ToString(), default));
             }
 
             await using (var dbA = fixture.CreateDb(new TestTenant(tenantA)))
             {
                 var tenant = new TestTenant(tenantA);
+                var allowed = new FilesController(storage, dbA, new TestUser(userA), tenant, new TestPermissions(true),
+                    new StoredFileDeletionProcessor(dbA, storage, new TenantExecutionContext(tenant)));
+                var download = Assert.IsType<FileStreamResult>(await allowed.Download(fileId.ToString(), default));
+                await download.FileStream.DisposeAsync();
+
                 var denied = new FilesController(storage, dbA, new TestUser(Guid.NewGuid()), tenant, new TestPermissions(false),
                     new StoredFileDeletionProcessor(dbA, storage, new TenantExecutionContext(tenant)));
                 Assert.IsType<ForbidResult>(await denied.Download(fileId.ToString(), default));

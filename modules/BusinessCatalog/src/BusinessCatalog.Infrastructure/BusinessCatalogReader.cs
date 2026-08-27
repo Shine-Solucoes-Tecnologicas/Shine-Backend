@@ -11,6 +11,12 @@ public sealed class BusinessCatalogReader(BusinessCatalogDbContext db) : IBusine
             .Select(x => new ProfessionalCatalogEntry(x.Id, x.Name, x.IsActive))
             .SingleOrDefaultAsync(cancellationToken);
 
+    public Task<ProfessionalCatalogEntry?> FindProfessionalByUserAsync(Guid tenantId, Guid userId, CancellationToken cancellationToken = default) =>
+        db.Professionals.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.UserId == userId)
+            .Select(x => new ProfessionalCatalogEntry(x.Id, x.Name, x.IsActive))
+            .SingleOrDefaultAsync(cancellationToken);
+
     public Task<ServiceCatalogEntry?> FindServiceAsync(Guid tenantId, Guid serviceId, CancellationToken cancellationToken = default) =>
         db.Services.AsNoTracking()
             .Where(x => x.TenantId == tenantId && x.Id == serviceId)

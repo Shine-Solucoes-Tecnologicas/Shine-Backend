@@ -11,7 +11,7 @@ Exemplo para desenvolvimento (não use uma senha real no repositório):
 ## Ambiente local com Docker
 
 O PostgreSQL do projeto roda via Docker Compose na porta `5433` do Windows,
-evitando conflito com uma instalaÃ§Ã£o local na porta `5432`.
+evitando conflito com uma instalação local na porta `5432`.
 
 ```powershell
 docker compose up -d
@@ -21,6 +21,8 @@ $env:ConnectionStrings__ShineDb = 'Host=localhost;Port=5433;Database=shine;Usern
 dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
 dotnet run --project host/Shine.Api
 ```
+
+O `appsettings.Development.json` usa essa mesma porta. Uma variável de ambiente continua tendo precedência quando for necessário apontar para outro banco.
 
 O arquivo `.env.example` contém apenas nomes e valores ilustrativos. Segredos locais devem permanecer fora do controle de versão.
 
@@ -75,3 +77,7 @@ Para rotacionar sem invalidar sessões imediatamente:
 4. remova a chave anterior e publique novamente.
 
 Tokens novos carregam `kid` e são assinados somente pela chave ativa. A validação seleciona a chave correspondente e rejeita `kid` desconhecido. Tokens antigos sem `kid` podem ser validados contra o key ring durante a janela de migração. O campo legado `Jwt:Secret` continua aceito apenas para compatibilidade de desenvolvimento e gera `kid=legacy`; novos ambientes devem usar `SigningKeys`.
+
+## Runtime, filas e armazenamento
+
+As chaves `RabbitMq`, `FileStorage` e os requisitos operacionais dos workers estão descritos em [`runtime-and-operations.md`](runtime-and-operations.md). Credenciais do broker, connection strings e caminhos de storage específicos do ambiente devem ser fornecidos fora do repositório.

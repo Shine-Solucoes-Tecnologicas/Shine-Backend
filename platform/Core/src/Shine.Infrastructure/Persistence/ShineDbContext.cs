@@ -273,6 +273,9 @@ public sealed class ShineDbContext(
         modelBuilder.Entity<CustomerAccountRolePermission>(entity =>
         {
             entity.HasKey(link => new { link.RoleId, link.PermissionId });
+            entity.Property(link => link.Scope).HasConversion<int>()
+                .HasDefaultValue(PermissionScope.All)
+                .HasSentinel((PermissionScope)(-1));
             entity.HasOne(link => link.Role).WithMany(role => role.Permissions).HasForeignKey(link => link.RoleId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(link => link.Permission).WithMany().HasForeignKey(link => link.PermissionId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -337,6 +340,9 @@ public sealed class ShineDbContext(
         modelBuilder.Entity<RolePermission>(entity =>
         {
             entity.HasKey(link => new { link.RoleId, link.PermissionId });
+            entity.Property(link => link.Scope).HasConversion<int>()
+                .HasDefaultValue(PermissionScope.All)
+                .HasSentinel((PermissionScope)(-1));
             entity.HasOne(link => link.Role).WithMany(role => role.Permissions).HasForeignKey(link => link.RoleId);
             entity.HasOne(link => link.Permission).WithMany(permission => permission.Roles).HasForeignKey(link => link.PermissionId);
         });

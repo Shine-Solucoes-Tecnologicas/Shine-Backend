@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Scheduling.Application;
 using Scheduling.Domain;
+using Shine.Api;
 using Shine.Api.Controllers;
 using Shine.Domain;
 using Shine.Domain.Identity;
@@ -26,7 +27,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
             await catalogDb.SaveChangesAsync();
         }
         var controller = new SchedulingController(db, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-            new NoOpPublisher(), new NoOpLogWriter(), new NotConfiguredGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
+            new NoOpPublisher(), new NoOpLogWriter(), new NotConfiguredGuard(), new AllowAllSchedulingScopeAuthorization(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
         var startsAtUtc = DateTime.UtcNow.AddDays(2);
 
         var response = await controller.CreateAppointment(new CreateAppointmentRequest(
@@ -55,7 +56,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         {
             await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
             var controller = new SchedulingController(db, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
+                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new AllowAllSchedulingScopeAuthorization(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
             return await controller.CreateAppointment(request, default);
         }
 
@@ -93,7 +94,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         {
             await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
             var controller = new SchedulingController(db, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
+                new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new AllowAllSchedulingScopeAuthorization(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
             return await controller.RescheduleAppointment(id,
                 new RescheduleAppointmentRequest(target, target.AddMinutes(30), version), default);
         }
@@ -126,7 +127,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         var publisher = new CapturingPublisher();
         var validator = new CustomerManagement(customerDb);
         var controller = new SchedulingController(schedulingDb, new TestTenant(tenant.Id), new AvailabilitySlotCalculator(),
-            publisher, new NoOpLogWriter(), new UnlimitedGuard(), validator, fixture.CreateBusinessCatalogReader(new TestTenant(tenant.Id)));
+            publisher, new NoOpLogWriter(), new UnlimitedGuard(), new AllowAllSchedulingScopeAuthorization(), validator, fixture.CreateBusinessCatalogReader(new TestTenant(tenant.Id)));
         var startsAtUtc = DateTime.UtcNow.AddDays(5);
 
         var result = await controller.CreateAppointment(new CreateAppointmentRequest(
@@ -164,7 +165,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         }
         await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(tenant.Id));
         var controller = new SchedulingController(schedulingDb, new TestTenant(tenant.Id), new AvailabilitySlotCalculator(),
-            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new CustomerManagement(customerDb), fixture.CreateBusinessCatalogReader(new TestTenant(tenant.Id)));
+            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new AllowAllSchedulingScopeAuthorization(), new CustomerManagement(customerDb), fixture.CreateBusinessCatalogReader(new TestTenant(tenant.Id)));
         var startsAtUtc = DateTime.UtcNow.AddDays(6);
 
         foreach (var customerId in new[] { foreignCustomer.Id, inactiveCustomer.Id })
@@ -221,7 +222,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         }
         await using var schedulingDb = fixture.CreateSchedulingDb(new TestTenant(unitId));
         var controller = new SchedulingController(schedulingDb, new TestTenant(unitId), new AvailabilitySlotCalculator(),
-            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
+            new NoOpPublisher(), new NoOpLogWriter(), new UnlimitedGuard(), new AllowAllSchedulingScopeAuthorization(), businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
         var startsAtUtc = DateTime.UtcNow.AddDays(3);
 
         var result = await controller.CreateAppointment(new CreateAppointmentRequest(
@@ -262,6 +263,15 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
     private sealed class NoOpPublisher : IAppointmentEventPublisher
     {
         public Task PublishAsync(AppointmentEvent appointmentEvent, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class AllowAllSchedulingScopeAuthorization : ISchedulingScopeAuthorization
+    {
+        public Task<SchedulingScopeDecision> AuthorizeAsync(string permissionCode, Guid? requestedProfessionalId = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(new SchedulingScopeDecision(
+                SchedulingScopeDecisionStatus.Allowed, Shine.Domain.Authorization.PermissionScope.All, requestedProfessionalId));
+        public Task<SchedulingScopeDecision> AuthorizeAllAsync(string permissionCode, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new SchedulingScopeDecision(SchedulingScopeDecisionStatus.Allowed, Shine.Domain.Authorization.PermissionScope.All));
     }
 
     private sealed class CapturingPublisher : IAppointmentEventPublisher
