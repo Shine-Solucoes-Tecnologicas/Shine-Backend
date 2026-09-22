@@ -1,53 +1,93 @@
-# Shine Backend
+# Shine · Backend
 
-Base da solução .NET do Shine, preparada para arquitetura modular.
+API de uma plataforma de gestão de serviços com **ASP.NET Core, .NET 10 e PostgreSQL**. Um monólito modular que reúne identidade, catálogo de serviços, agendamento e faturamento.
 
-## Estrutura
+> **Projeto de portfólio.** A iniciativa comercial foi encerrada. O projeto preserva a implementação e as decisões técnicas, sem oferta comercial, SLA ou compromisso de manutenção para produção.
 
-- `host/Shine.Api`: composição HTTP e endpoints da API.
-- `platform/Core`: identidade, autorização, clientes e capacidades centrais atuais.
-- `platform/Shared`: tipos compartilhados mínimos entre plataforma e módulos.
-- `modules/Billing`: domínio, aplicação, infraestrutura e testes de Billing.
-- `modules/Scheduling`: domínio, aplicação, infraestrutura e testes de Agenda.
-- `tests/Shine.TestKit`: infraestrutura reutilizável para testes de integração.
-- `tests/Shine.ArchitectureTests`: limites automatizados entre módulos e camadas.
+[Frontend](https://github.com/Shine-Solucoes-Tecnologicas/Shine-Frontend) · [Arquitetura](docs/architecture.md) · [Contribuição](CONTRIBUTING.md)
 
-As regras completas estão em [`docs/architecture.md`](docs/architecture.md).
+## Destaques técnicos
 
-Nenhum módulo funcional foi criado nesta etapa.
+| Área | Implementação |
+| --- | --- |
+| Organização | Domain, Application e Infrastructure por módulo; limites verificados por testes |
+| Identidade | Autenticação, autorização, recuperação de senha |
+| Múltiplas unidades | Seleção de tenant e escopos de acesso explícitos |
+| Agenda | Disponibilidade, capacidade, agendamentos e lembretes |
+| Catálogo | Serviços, profissionais e recursos do negócio |
+| Financeiro | Contratos, assinaturas, registros financeiros e webhooks |
+| Persistência | Entity Framework Core, migrations e PostgreSQL |
+| Qualidade | Testes unitários, de integração e de arquitetura; CI e verificações de segurança |
 
-## Executar
+Esses destaques descrevem código presente, não uma certificação de prontidão para produção. O frontend ainda não expõe todos os módulos. Entregas de e-mail em desenvolvimento usam simulação; integrações externas dependem de configuração.
 
-```bash
+## Arquitetura
+
+```mermaid
+flowchart TD
+    Web[React / cliente HTTP] --> Api[Shine.Api · endpoints e composição]
+    Api --> Core[Core · identidade]
+    Api --> Catalog[BusinessCatalog · catálogo]
+    Api --> Scheduling[Scheduling · agenda]
+    Api --> Billing[Billing · financeiro]
+    Core --> Db[(PostgreSQL)]
+    Catalog --> Db
+    Scheduling --> Db
+    Billing --> Db
+```
+
+Cada módulo mantém regras e testes próprios. Integrações usam contratos, eventos ou portas explícitas; módulos não referenciam outros módulos diretamente. Veja as [regras de dependência](docs/architecture.md) e as [decisões de persistência](docs/persistence.md).
+
+## Executar localmente
+
+Pré-requisitos: SDK **.NET 10.0.400** (ou patch compatível com `global.json`) e Docker com Compose.
+
+Na raiz deste repositório, em PowerShell:
+
+```powershell
 docker compose up -d
-export ConnectionStrings__ShineDb='Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
+dotnet tool restore
+dotnet restore Shine.Backend.slnx
+$env:ConnectionStrings__ShineDb = 'Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
 dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
-dotnet run --project host/Shine.Api
+dotnet run --project host/Shine.Api --launch-profile http
 ```
 
-## Executar a imagem da API
+A API atende em `http://localhost:5098`; verifique `GET /health`. Os valores acima são exclusivos do ambiente local. As configurações de desenvolvimento incluem chaves ilustrativas e entregas simuladas; use segredos próprios fora desse ambiente.
 
-```bash
-docker build -t shine-backend:local .
-docker run --rm -p 8080:8080 \
-  -e ASPNETCORE_ENVIRONMENT=Development \
-  -e 'ConnectionStrings__ShineDb=Host=host.docker.internal;Port=5433;Database=shine;Username=shine;Password=shine' \
-  -e Jwt__Secret=Shine.Local.Container.Jwt.Secret.With.More.Than.32.Bytes \
-  -e RabbitMq__Enabled=false \
-  shine-backend:local
+Para encerrar os serviços sem apagar os dados: `docker compose stop`.
+
+## Validar
+
+```powershell
+dotnet build Shine.Backend.slnx --configuration Release
+dotnet test Shine.Backend.slnx --configuration Release --no-build
 ```
 
-A imagem usa runtime sem SDK, executa com usuário não-root, expõe somente a porta `8080`, grava arquivos em `/var/lib/shine/storage` e verifica `GET /health`. Segredos são fornecidos somente na execução; não use `ARG`, `ENV` no Dockerfile ou arquivos versionados para valores reais.
+Os testes de integração exigem PostgreSQL e configuração da conexão. Consulte o [isolamento dos bancos de teste](docs/testing/integration-database-isolation.md). Nunca aponte testes para um banco de produção.
 
-Consulte [docs/configuration.md](docs/configuration.md) para a configuração por ambiente.
-O contrato técnico de módulos e limites está em [docs/entitlements.md](docs/entitlements.md).
-O checklist de produção e as responsabilidades de rotação estão em [docs/deployment-security.md](docs/deployment-security.md).
-As verificações automatizadas e a política de exceções estão em [docs/security-ci.md](docs/security-ci.md).
+## Explore o código
 
-## Contribuição e licença
+```text
+host/Shine.Api/            Endpoints, autenticação e composição HTTP
+platform/Core/            Identidade, autorização e capacidades centrais
+platform/Shared/          Tipos mínimos compartilhados
+modules/BusinessCatalog/  Catálogo de serviços e profissionais
+modules/Scheduling/       Agenda e disponibilidade
+modules/Billing/          Contratos e financeiro
+tests/                    TestKit e testes de arquitetura
+docs/                     Contratos, decisões e operação
+```
 
-O fluxo de branches, Pull Requests, revisão e validação está em [CONTRIBUTING.md](CONTRIBUTING.md).
+## Documentação
 
-Este é um projeto proprietário da Shine Soluções Tecnológicas. Consulte [LICENSE](LICENSE) para os termos aplicáveis.
+- [Autorização administrativa](docs/administrative-authorization.md)
+- [Configuração](docs/configuration.md)
+- [Entitlements e limites](docs/entitlements.md)
 
-Valide a API em `GET /health`.
+
+- [Implantação e segurança](docs/deployment-security.md) e [CI](docs/security-ci.md)
+
+## Uso do código
+
+Disponibilizado para apresentação e consulta. Nenhuma licença de código aberto foi concedida; consulte [NOTICE.md](NOTICE.md). Para relatar vulnerabilidades, veja [SECURITY.md](SECURITY.md).
