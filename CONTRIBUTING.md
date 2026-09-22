@@ -1,6 +1,6 @@
 # Contribuindo com o Shine Backend
 
-Este documento define o fluxo de versionamento e revisão do backend. Ele se aplica a alterações de código, infraestrutura, banco de dados e documentação.
+A iniciativa comercial foi encerrada; o projeto continua como portfólio. Este documento define o fluxo de versionamento e revisão do backend. Ele se aplica a alterações de código, infraestrutura, banco de dados e documentação.
 
 ## Branch principal
 
