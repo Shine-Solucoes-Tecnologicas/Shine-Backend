@@ -4,7 +4,7 @@ API de uma plataforma de gestão de serviços com **ASP.NET Core, .NET 10 e Post
 
 > **Projeto de portfólio.** A iniciativa comercial foi encerrada. O projeto preserva a implementação e as decisões técnicas, sem oferta comercial, SLA ou compromisso de manutenção para produção.
 
-[Frontend](https://github.com/Shine-Solucoes-Tecnologicas/Shine-Frontend) · [Arquitetura](docs/architecture.md) · [Contribuição](CONTRIBUTING.md)
+[Frontend](https://github.com/Shine-Solucoes-Tecnologicas/Shine-Frontend) · [Arquitetura](docs/architecture.md) · [Contribuição](CONTRIBUTING.md) · [Licença](LICENSE) · [Segurança](SECURITY.md)
 
 ## Destaques técnicos
 
@@ -81,13 +81,15 @@ docs/                     Contratos, decisões e operação
 
 ## Documentação
 
-- [Autorização administrativa](docs/administrative-authorization.md)
+- [Inventário e convenções da API](docs/api/README.md)
+- [OpenAPI e compatibilidade](docs/openapi.md)
 - [Configuração](docs/configuration.md)
 - [Entitlements e limites](docs/entitlements.md)
-
-
+- [Arquitetura](docs/architecture.md) e [persistência](docs/persistence.md)
+- [Autorização administrativa](docs/administrative-authorization.md)
 - [Implantação e segurança](docs/deployment-security.md) e [CI](docs/security-ci.md)
+- [Workers, eventos e operação](docs/runtime-and-operations.md)
 
 ## Uso do código
 
-Disponibilizado para apresentação e consulta. Nenhuma licença de código aberto foi concedida; consulte [NOTICE.md](NOTICE.md). Para relatar vulnerabilidades, veja [SECURITY.md](SECURITY.md).
+Disponibilizado para apresentação e consulta sob os termos da [LICENSE](LICENSE); não é software de código aberto. Consulte [NOTICE.md](NOTICE.md). Para relatar vulnerabilidades, veja [SECURITY.md](SECURITY.md).

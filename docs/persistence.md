@@ -1,18 +1,7 @@
 # Persistência
 
-## Banco
+O backend usa um PostgreSQL compartilhado por quatro `DbContext`, mantendo ownership e migrations independentes por módulo. O inventário, a ordem de aplicação, os comandos e os procedimentos de diagnóstico estão em [`runtime-and-operations.md`](runtime-and-operations.md).
 
-O ambiente local usa PostgreSQL via `docker compose up -d postgres`, com banco `shine` na porta `5432`.
+No ambiente local, `docker compose up -d postgres` publica o banco `shine` em `localhost:5433`. A aplicação não executa migrations automaticamente ao iniciar.
 
-## Migrations
-
-As migrations são geradas e aplicadas pelo EF Core:
-
-```bash
-dotnet ef migrations add InitialPersistence --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api --output-dir Persistence/Migrations
-dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
-```
-
-## Seed
-
-O seed deve ser determinístico e idempotente, executado apenas quando explicitamente habilitado. Como ainda não existem módulos funcionais ou entidades de negócio, a migration inicial não insere dados.
+Seeds devem ser determinísticos, idempotentes e executados somente quando explicitamente habilitados. Dados de autorização versionados pertencem ao Core; dados funcionais não devem ser introduzidos implicitamente por inicialização do host.

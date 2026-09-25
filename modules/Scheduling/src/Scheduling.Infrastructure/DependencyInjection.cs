@@ -22,6 +22,7 @@ public static class DependencyInjection
                 provider.GetRequiredService<SchedulingDbContext>(), provider.GetRequiredService<IBusinessCatalogReader>(), provider.GetRequiredService<Scheduling.Application.AvailabilitySlotCalculator>(), SchedulingWidgetKind.QuietestHours))
             .AddScoped<Scheduling.Application.IAppointmentEventPublisher, AppointmentEventPublisher>()
             .AddScoped<Shine.Application.ICustomerHistoryReader, CustomerAppointmentHistoryReader>()
+            .AddScoped<Scheduling.Application.ICurrentProfessionalResolver, CurrentProfessionalResolver>()
             .AddScoped<OperationalEventPublisher>()
             .AddScoped<IOutboxMessageHandler, LoggingOutboxMessageHandler>()
             .AddHostedService<SchedulingOutboxWorker>();

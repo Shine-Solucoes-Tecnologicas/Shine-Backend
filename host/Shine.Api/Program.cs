@@ -23,7 +23,9 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<Shine.Infrastructure.Persistence.ShineDbContext>("postgresql")
     .AddCheck<RabbitMqHealthCheck>("rabbitmq");
 builder.Services.AddControllers();
+builder.Services.AddShineOpenApi();
 builder.Services.AddScoped<AppointmentEntitlementReconciliationService>();
+builder.Services.AddScoped<ISchedulingScopeAuthorization, SchedulingScopeAuthorization>();
 builder.Services.AddHostedService<AppointmentEntitlementReconciliationWorker>();
 builder.Services.AddHostedService<StoredFileDeletionWorker>();
 builder.Services.AddApiSecurityConfiguration(builder.Configuration, builder.Environment);
@@ -65,6 +67,7 @@ app.UseMiddleware<AuthenticationRateLimitIdentityMiddleware>();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseShineOpenApi();
 
 // Configure the HTTP request pipeline.
 app.MapControllers();

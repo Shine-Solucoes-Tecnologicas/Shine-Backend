@@ -17,6 +17,7 @@ public static class AuthorizationSeed
         ["modules.manage"] = "Gerenciar acesso aos módulos",
         ["scheduling.read"] = "Visualizar agenda e disponibilidade",
         ["scheduling.manage"] = "Gerenciar agenda, disponibilidade e agendamentos",
+        ["scheduling.configure"] = "Configurar políticas, capacidade e parâmetros administrativos da agenda",
         ["business-catalog.read"] = "Visualizar profissionais e serviços",
         ["business-catalog.manage"] = "Gerenciar profissionais, serviços e seus vínculos",
         ["admin.read"] = "Consultar a plataforma administrativamente",
@@ -43,12 +44,19 @@ public static class AuthorizationSeed
     public static async Task SeedCustomerAccountDefaultsAsync(ShineDbContext db, Guid accountId, Guid administratorUserId, CancellationToken cancellationToken = default)
     {
         var permissions = (await EnsureInitialPermissionsAsync(db, cancellationToken)).ToDictionary(x => x.Code, StringComparer.Ordinal);
-        var definitions = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        var definitions = new Dictionary<string, PermissionGrant[]>(StringComparer.Ordinal)
         {
-            [CustomerAccountRole.AdministratorName] = ["account.read", "account.manage", "account.access.manage", "billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
-            [CustomerAccountRole.FinancialName] = ["billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"],
-            [CustomerAccountRole.ViewerName] = ["tenant.read", "business-catalog.read", "scheduling.read", "dashboard.read", "files.read", "customers.read"],
-            [CustomerAccountRole.EditorName] = ["tenant.read", "business-catalog.read", "business-catalog.manage", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage", "customers.read", "customers.manage"]
+            [CustomerAccountRole.AdministratorName] = Grants("account.read", "account.manage", "account.access.manage", "billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"),
+            [CustomerAccountRole.FinancialName] = Grants("billing.read", "billing.manage", "subscriptions.read", "subscriptions.manage"),
+            [CustomerAccountRole.ViewerName] = Grants("tenant.read", "business-catalog.read", "scheduling.read", "dashboard.read", "files.read", "customers.read"),
+            [CustomerAccountRole.EditorName] = Grants("tenant.read", "business-catalog.read", "business-catalog.manage", "scheduling.read", "scheduling.manage", "dashboard.read", "dashboard.manage", "files.read", "files.manage", "customers.read", "customers.manage"),
+            [CustomerAccountRole.SchedulingProfessionalName] =
+            [
+                new("scheduling.read", PermissionScope.Own),
+                new("scheduling.manage", PermissionScope.Own)
+            ],
+            [CustomerAccountRole.SchedulingReceptionName] = Grants("scheduling.read", "scheduling.manage"),
+            [CustomerAccountRole.SchedulingManagerName] = Grants("scheduling.read", "scheduling.manage", "scheduling.configure")
         };
 
         var existing = await db.CustomerAccountRoles.Where(x => x.AccountId == accountId && definitions.Keys.Contains(x.Name)).ToDictionaryAsync(x => x.Name, StringComparer.Ordinal, cancellationToken);
@@ -56,12 +64,16 @@ public static class AuthorizationSeed
             if (!existing.ContainsKey(name)) { var role = new CustomerAccountRole(accountId, name, isSystem: true); db.CustomerAccountRoles.Add(role); existing[name] = role; }
         await db.SaveChangesAsync(cancellationToken);
 
-        foreach (var (roleName, codes) in definitions)
-        foreach (var code in codes)
+        foreach (var (roleName, grants) in definitions)
+        foreach (var grant in grants)
         {
-            var role = existing[roleName]; var permission = permissions[code];
-            if (!await db.CustomerAccountRolePermissions.AnyAsync(x => x.RoleId == role.Id && x.PermissionId == permission.Id, cancellationToken))
-                db.CustomerAccountRolePermissions.Add(new CustomerAccountRolePermission(role.Id, permission.Id));
+            var role = existing[roleName]; var permission = permissions[grant.Code];
+            var link = await db.CustomerAccountRolePermissions.SingleOrDefaultAsync(
+                x => x.RoleId == role.Id && x.PermissionId == permission.Id, cancellationToken);
+            if (link is null)
+                db.CustomerAccountRolePermissions.Add(new CustomerAccountRolePermission(role.Id, permission.Id, grant.Scope));
+            else
+                link.SetScope(grant.Scope);
         }
 
         var administrator = existing[CustomerAccountRole.AdministratorName];
@@ -138,7 +150,7 @@ public static class AuthorizationSeed
         foreach (var role in new[] { owner, administrator })
         foreach (var permission in permissions)
             if (!existingSet.Contains((role.Id, permission.Id)))
-                db.RolePermissions.Add(new RolePermission(role.Id, permission.Id));
+                db.RolePermissions.Add(new RolePermission(role.Id, permission.Id, PermissionScope.All));
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -202,4 +214,9 @@ public static class AuthorizationSeed
 
         return role;
     }
+
+    private static PermissionGrant[] Grants(params string[] codes) =>
+        codes.Select(code => new PermissionGrant(code, PermissionScope.All)).ToArray();
+
+    private sealed record PermissionGrant(string Code, PermissionScope Scope);
 }

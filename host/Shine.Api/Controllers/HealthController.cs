@@ -28,7 +28,7 @@ public sealed class HealthController : ControllerBase
                 {
                     status = entry.Value.Status.ToString().ToLowerInvariant(),
                     duration = entry.Value.Duration,
-                    error = entry.Value.Exception?.Message
+                    error = entry.Value.Exception is null ? null : "dependency_unavailable"
                 })
         }, cancellationToken: cancellationToken);
     }

@@ -144,6 +144,103 @@ public sealed class CustomerAccountAuthorizationSecurityTests(DatabaseFixture fi
         Assert.False(await authorization.HasGlobalPermissionAsync(setup.User.Id, "billing.commercial.read"));
     }
 
+    [Fact]
+    public async Task Scheduling_system_roles_have_the_exact_grant_matrix_and_seed_is_idempotent()
+    {
+        await using var db = fixture.CreateDb();
+        var setup = await CreateSetupAsync(db);
+
+        await AuthorizationSeed.SeedCustomerAccountDefaultsAsync(db, setup.Account.Id, setup.Owner.Id);
+
+        var roles = await db.CustomerAccountRoles.AsNoTracking()
+            .Where(x => x.AccountId == setup.Account.Id &&
+                (x.Name == CustomerAccountRole.SchedulingProfessionalName ||
+                 x.Name == CustomerAccountRole.SchedulingReceptionName ||
+                 x.Name == CustomerAccountRole.SchedulingManagerName))
+            .Select(x => new
+            {
+                x.Name,
+                Grants = x.Permissions.Select(p => new { p.Permission.Code, p.Scope }).OrderBy(p => p.Code).ToArray()
+            })
+            .ToDictionaryAsync(x => x.Name);
+
+        Assert.Equal(3, roles.Count);
+        Assert.Collection(roles[CustomerAccountRole.SchedulingProfessionalName].Grants,
+            grant => Assert.Equal(("scheduling.manage", PermissionScope.Own), (grant.Code, grant.Scope)),
+            grant => Assert.Equal(("scheduling.read", PermissionScope.Own), (grant.Code, grant.Scope)));
+        Assert.Collection(roles[CustomerAccountRole.SchedulingReceptionName].Grants,
+            grant => Assert.Equal(("scheduling.manage", PermissionScope.All), (grant.Code, grant.Scope)),
+            grant => Assert.Equal(("scheduling.read", PermissionScope.All), (grant.Code, grant.Scope)));
+        Assert.Collection(roles[CustomerAccountRole.SchedulingManagerName].Grants,
+            grant => Assert.Equal(("scheduling.configure", PermissionScope.All), (grant.Code, grant.Scope)),
+            grant => Assert.Equal(("scheduling.manage", PermissionScope.All), (grant.Code, grant.Scope)),
+            grant => Assert.Equal(("scheduling.read", PermissionScope.All), (grant.Code, grant.Scope)));
+    }
+
+    [Fact]
+    public async Task All_scope_wins_over_own_and_revocation_is_visible_without_stale_cache()
+    {
+        await using var db = fixture.CreateDb();
+        var setup = await CreateSetupAsync(db);
+        var roles = await db.CustomerAccountRoles
+            .Where(x => x.AccountId == setup.Account.Id)
+            .ToDictionaryAsync(x => x.Name);
+        var professional = new CustomerAccountUserRole(setup.Account.Id, setup.User.Id,
+            roles[CustomerAccountRole.SchedulingProfessionalName].Id, allUnits: true, allModules: true);
+        var reception = new CustomerAccountUserRole(setup.Account.Id, setup.User.Id,
+            roles[CustomerAccountRole.SchedulingReceptionName].Id, allUnits: true, allModules: true);
+        db.CustomerAccountUserRoles.AddRange(professional, reception);
+        await db.SaveChangesAsync();
+        var authorization = new CustomerAccountAuthorization(db);
+
+        Assert.Equal(PermissionScope.All, await authorization.GetPermissionScopeAsync(
+            setup.User.Id, setup.Account.Id, "scheduling.read", setup.UnitA.Id, "SCHEDULING"));
+
+        await db.CustomerAccountUserRoles
+            .Where(x => x.AccountId == setup.Account.Id && x.UserId == setup.User.Id &&
+                x.RoleId == roles[CustomerAccountRole.SchedulingReceptionName].Id)
+            .ExecuteDeleteAsync();
+
+        var remainingGrants = await db.CustomerAccountUserRoles.AsNoTracking()
+            .Where(x => x.AccountId == setup.Account.Id && x.UserId == setup.User.Id)
+            .SelectMany(x => x.Role.Permissions
+                .Where(p => p.Permission.Code == "scheduling.read")
+                .Select(p => new { x.Role.Name, p.Scope }))
+            .ToArrayAsync();
+        var remainingGrant = Assert.Single(remainingGrants);
+        Assert.Equal(CustomerAccountRole.SchedulingProfessionalName, remainingGrant.Name);
+        Assert.Equal(PermissionScope.Own, remainingGrant.Scope);
+
+        Assert.Equal(PermissionScope.Own, await authorization.GetPermissionScopeAsync(
+            setup.User.Id, setup.Account.Id, "scheduling.read", setup.UnitA.Id, "SCHEDULING"));
+    }
+
+    [Fact]
+    public async Task Account_administrator_and_custom_manage_grant_do_not_imply_scheduling_configuration()
+    {
+        await using var db = fixture.CreateDb();
+        var setup = await CreateSetupAsync(db);
+        var roles = await db.CustomerAccountRoles.Where(x => x.AccountId == setup.Account.Id).ToDictionaryAsync(x => x.Name);
+        var administrator = roles[CustomerAccountRole.AdministratorName];
+        var custom = new CustomerAccountRole(setup.Account.Id, $"Custom {Guid.NewGuid():N}");
+        db.CustomerAccountRoles.Add(custom);
+        var manage = await db.Permissions.SingleAsync(x => x.Code == "scheduling.manage");
+        db.CustomerAccountRolePermissions.Add(new CustomerAccountRolePermission(custom.Id, manage.Id, PermissionScope.All));
+        db.CustomerAccountUserRoles.Add(new CustomerAccountUserRole(setup.Account.Id, setup.User.Id, custom.Id, true, true));
+        await db.SaveChangesAsync();
+        var authorization = new CustomerAccountAuthorization(db);
+
+        Assert.False(await authorization.HasPermissionAsync(setup.Owner.Id, setup.Account.Id,
+            "scheduling.read", setup.UnitA.Id, "SCHEDULING"));
+        Assert.False(await authorization.HasPermissionAsync(setup.Owner.Id, setup.Account.Id,
+            "scheduling.configure", setup.UnitA.Id, "SCHEDULING"));
+        Assert.True(await authorization.HasPermissionAsync(setup.User.Id, setup.Account.Id,
+            "scheduling.manage", setup.UnitA.Id, "SCHEDULING"));
+        Assert.False(await authorization.HasPermissionAsync(setup.User.Id, setup.Account.Id,
+            "scheduling.configure", setup.UnitA.Id, "SCHEDULING"));
+        Assert.Equal(CustomerAccountRole.AdministratorName, administrator.Name);
+    }
+
     private static async Task<Setup> CreateSetupAsync(Shine.Infrastructure.Persistence.ShineDbContext db)
     {
         var owner = new User($"owner-{Guid.NewGuid():N}@example.test", "hash");
@@ -156,8 +253,8 @@ public sealed class CustomerAccountAuthorizationSecurityTests(DatabaseFixture fi
         db.AddRange(owner, user, account, unitA, unitB, new CustomerAccountUser(account.Id, owner.Id), new CustomerAccountUser(account.Id, user.Id));
         await db.SaveChangesAsync();
         await AuthorizationSeed.SeedCustomerAccountDefaultsAsync(db, account.Id, owner.Id);
-        return new Setup(user, account, unitA, unitB);
+        return new Setup(owner, user, account, unitA, unitB);
     }
 
-    private sealed record Setup(User User, CustomerAccount Account, Tenant UnitA, Tenant UnitB);
+    private sealed record Setup(User Owner, User User, CustomerAccount Account, Tenant UnitA, Tenant UnitB);
 }

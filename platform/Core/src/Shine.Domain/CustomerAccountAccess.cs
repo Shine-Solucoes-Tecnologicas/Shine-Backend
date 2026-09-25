@@ -24,6 +24,9 @@ public sealed class CustomerAccountRole
     public const string ViewerName = "Viewer";
     public const string EditorName = "Editor";
     public const string FinancialName = "Financial";
+    public const string SchedulingProfessionalName = "SchedulingProfessional";
+    public const string SchedulingReceptionName = "SchedulingReception";
+    public const string SchedulingManagerName = "SchedulingManager";
 
     private CustomerAccountRole() { }
     public CustomerAccountRole(Guid accountId, string name, bool isSystem = false)
@@ -43,11 +46,15 @@ public sealed class CustomerAccountRole
 public sealed class CustomerAccountRolePermission
 {
     private CustomerAccountRolePermission() { }
-    public CustomerAccountRolePermission(Guid roleId, Guid permissionId) { RoleId = roleId; PermissionId = permissionId; }
+    public CustomerAccountRolePermission(Guid roleId, Guid permissionId,
+        Shine.Domain.Authorization.PermissionScope scope = Shine.Domain.Authorization.PermissionScope.All)
+    { RoleId = roleId; PermissionId = permissionId; Scope = scope; }
     public Guid RoleId { get; private set; }
     public Guid PermissionId { get; private set; }
+    public Shine.Domain.Authorization.PermissionScope Scope { get; private set; } = Shine.Domain.Authorization.PermissionScope.All;
     public CustomerAccountRole Role { get; private set; } = null!;
     public Shine.Domain.Authorization.Permission Permission { get; private set; } = null!;
+    public void SetScope(Shine.Domain.Authorization.PermissionScope scope) => Scope = scope;
 }
 
 public sealed class CustomerAccountUserRole

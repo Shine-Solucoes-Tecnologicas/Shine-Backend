@@ -36,7 +36,11 @@ public sealed class CustomerAccountAccessController(
                 x.Id,
                 x.Name,
                 x.IsSystem,
-                Permissions = x.Permissions.Select(p => p.Permission.Code).OrderBy(code => code).ToArray()
+                Permissions = x.Permissions.Select(p => p.Permission.Code).OrderBy(code => code).ToArray(),
+                Grants = x.Permissions
+                    .OrderBy(p => p.Permission.Code)
+                    .Select(p => new { Code = p.Permission.Code, Scope = p.Scope.ToString() })
+                    .ToArray()
             })
             .ToArrayAsync(cancellationToken);
         return Ok(roles);
