@@ -84,4 +84,3 @@ São consideradas incompatíveis, entre outras:
 - tornar obrigatório um campo antes opcional;
 - mudar tipo, formato ou significado sem transição;
 - restringir autenticação/autorização de uma operação existente sem estratégia de migração.
-
