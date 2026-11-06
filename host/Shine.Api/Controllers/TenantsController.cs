@@ -7,6 +7,7 @@ using Shine.Domain.Identity;
 using Shine.Infrastructure.Persistence.Seed;
 using Microsoft.Extensions.Options;
 using Shine.Domain;
+using System.Text.Json.Serialization;
 
 namespace Shine.Api.Controllers;
 
@@ -18,7 +19,9 @@ public sealed class TenantsController(
     ICurrentUser currentUser,
     ICurrentTenant currentTenant,
     IAccessTokenService accessTokenService,
-    IOptions<JwtOptions> jwtOptions) : ControllerBase
+    IOptions<JwtOptions> jwtOptions,
+    IWebSessionTransport webSession,
+    TenantSessionSelectionService tenantSelection) : ControllerBase
 {
     [HttpGet("accessible")]
     public async Task<ActionResult<IReadOnlyCollection<AccessibleTenantResponse>>> Accessible(CancellationToken cancellationToken)
@@ -38,9 +41,12 @@ public sealed class TenantsController(
     {
         var userId = RequireUser();
         var tenantName = request.Name?.Trim();
-        if (string.IsNullOrWhiteSpace(tenantName) || tenantName.Length > 200) return BadRequest();
+        if (string.IsNullOrWhiteSpace(tenantName) || tenantName.Length > 200)
+            return AuthenticationErrors.Result(400, AuthenticationErrors.UnitNameInvalid,
+                "O nome da unidade deve possuir entre 1 e 200 caracteres.", "name");
         if (await dbContext.Tenants.AnyAsync(tenant => tenant.Name.ToLower() == tenantName.ToLower(), cancellationToken))
-            return Conflict();
+            return AuthenticationErrors.Result(409, AuthenticationErrors.UnitNameConflict,
+                "Já existe uma unidade com este nome.", "name");
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         var accountId = currentTenant.TenantId is Guid selectedTenantId
             ? await dbContext.Tenants.AsNoTracking().Where(x => x.Id == selectedTenantId).Select(x => x.CustomerAccountId).SingleOrDefaultAsync(cancellationToken)
@@ -71,9 +77,16 @@ public sealed class TenantsController(
         dbContext.TenantPlans.Add(new TenantPlan(tenant.Id, defaultPlan.Id));
         await dbContext.SaveChangesAsync(cancellationToken);
         var roles = await dbContext.UserTenantRoles.Where(item => item.UserId == userId && item.TenantId == tenant.Id).Select(item => item.Role.Name).Distinct().ToArrayAsync(cancellationToken);
-        var token = accessTokenService.Create(userId, tenant.Id, tenant.Users.Single().UserTenantId, roles);
+        var refresh = RefreshTokenHash.Create();
+        var session = new RefreshToken(userId, tenant.Id, tenant.Users.Single().UserTenantId, refresh.Hash,
+            DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays));
+        dbContext.RefreshTokens.Add(session);
+        var token = accessTokenService.Create(userId, session.Id, tenant.Id, tenant.Users.Single().UserTenantId, roles);
+        await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return Created($"/api/tenants/{tenant.Id}", new TenantSelectionResponse(tenant.Id, tenant.Name, token.Token, token.ExpiresAtUtc));
+        webSession.WriteSession(HttpContext, refresh.Raw, session.ExpiresAtUtc);
+        return Created($"/api/tenants/{tenant.Id}", new TenantSelectionResponse(
+            tenant.Id, tenant.Name, token.Token, token.ExpiresAtUtc, webSession.ResponseRefreshToken(refresh.Raw)));
     }
 
     [HttpPost("select")]
@@ -81,33 +94,25 @@ public sealed class TenantsController(
     public async Task<ActionResult<TenantSelectionResponse>> Select(TenantSelectionRequest request, CancellationToken cancellationToken)
     {
         var userId = RequireUser();
-        var link = await dbContext.UserTenants
-            .AsNoTracking()
-            .Include(item => item.Tenant)
-            .SingleOrDefaultAsync(item => item.UserId == userId && item.TenantId == request.TenantId && item.IsActive && item.Tenant.IsActive, cancellationToken);
-        if (link is null) return Forbid();
-
-        var roles = await dbContext.UserTenantRoles
-            .AsNoTracking()
-            .Where(item => item.UserId == userId && item.TenantId == link.TenantId)
-            .Select(item => item.Role.Name)
-            .Distinct()
-            .ToArrayAsync(cancellationToken);
-        var token = accessTokenService.Create(userId, link.TenantId, link.UserTenantId, roles);
-        string? replacementRaw = null;
-        if (!string.IsNullOrWhiteSpace(request.RefreshToken))
-        {
-            var current = await dbContext.RefreshTokens.SingleOrDefaultAsync(item => item.TokenHash == RefreshTokenHash.Hash(request.RefreshToken) && item.UserId == userId, cancellationToken);
-            if (current is not null && current.IsActive(DateTime.UtcNow))
-            {
-                var replacement = RefreshTokenHash.Create();
-                current.Revoke(DateTime.UtcNow, replacement.Hash);
-                dbContext.RefreshTokens.Add(new RefreshToken(userId, link.TenantId, link.UserTenantId, replacement.Hash, DateTime.UtcNow.AddDays(jwtOptions.Value.RefreshTokenDays)));
-                await dbContext.SaveChangesAsync(cancellationToken);
-                replacementRaw = replacement.Raw;
-            }
-        }
-        return Ok(new TenantSelectionResponse(link.TenantId, link.Tenant.Name, token.Token, token.ExpiresAtUtc, replacementRaw));
+        var credential = webSession.ReadRefreshToken(HttpContext, request.RefreshToken);
+        if (credential is null)
+            return AuthenticationErrors.Result(401, AuthenticationErrors.SessionInvalid, "A sessão é inválida ou expirou.");
+        if (!await webSession.ValidateAntiforgeryAsync(HttpContext, credential))
+            return AuthenticationErrors.Result(400, AuthenticationErrors.CsrfValidationFailed,
+                "Não foi possível validar a origem da requisição.");
+        var result = await tenantSelection.SelectAsync(userId, request.TenantId, credential.RawToken, cancellationToken);
+        if (result.Outcome == TenantSessionSelectionOutcome.Unauthorized)
+            return AuthenticationErrors.Result(401, AuthenticationErrors.SessionInvalid, "A sessão é inválida ou expirou.");
+        if (result.Outcome == TenantSessionSelectionOutcome.Forbidden)
+            return AuthenticationErrors.Result(403, AuthenticationErrors.UnitAccessDenied,
+                "Você não possui acesso a esta unidade.");
+        webSession.WriteSession(HttpContext, result.RefreshToken!, result.RefreshTokenExpiresAtUtc!.GetValueOrDefault());
+        return Ok(new TenantSelectionResponse(
+            result.TenantId!.Value,
+            result.TenantName!,
+            result.AccessToken!,
+            result.AccessTokenExpiresAtUtc!.GetValueOrDefault(),
+            webSession.ResponseRefreshToken(result.RefreshToken!)));
     }
 
     private Guid RequireUser() => currentUser.UserId ?? throw new UnauthorizedAccessException("An authenticated user is required.");
@@ -115,4 +120,9 @@ public sealed class TenantsController(
 
 public sealed record TenantSelectionRequest(Guid TenantId, string? RefreshToken = null);
 public sealed record CreateTenantRequest(string Name);
-public sealed record TenantSelectionResponse(Guid TenantId, string TenantName, string AccessToken, DateTime ExpiresAtUtc, string? RefreshToken = null);
+public sealed record TenantSelectionResponse(
+    Guid TenantId,
+    string TenantName,
+    string AccessToken,
+    DateTime ExpiresAtUtc,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RefreshToken = null);

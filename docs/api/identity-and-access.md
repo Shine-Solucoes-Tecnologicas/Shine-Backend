@@ -14,10 +14,13 @@ Este guia cobre autenticação, sessões, organizações, unidades, usuários, p
 
 | Operação | Acesso | Efeito principal |
 | --- | --- | --- |
-| `POST /api/auth/register` | Público | Cria identidade, sem conceder unidade. |
+| `GET /api/auth/csrf` | Público | Emite o token anti-CSRF do navegador sem criar sessão. |
+| `POST /api/auth/register` | Público | Provisiona identidade não verificada, organização, primeira unidade, papéis e plano padrão; responde `202` sem criar sessão. |
+| `POST /api/auth/email-verification/resend` | Público | Resposta neutra para reenviar a confirmação quando aplicável. |
+| `POST /api/auth/email-verification/confirm` | Público | Confirma o e-mail e cria a primeira sessão contextual em cookie HttpOnly. |
 | `POST /api/auth/login` | Público | Autentica e cria sessão. |
-| `POST /api/auth/refresh` | Refresh token ativo | Rotaciona o token; reutilização não cria outra sessão válida. |
-| `POST /api/auth/logout` | Refresh token | Revoga a sessão correspondente. |
+| `POST /api/auth/refresh` | Cookie de refresh + anti-CSRF | Rotaciona o cookie; reutilização não cria outra sessão válida. |
+| `POST /api/auth/logout` | Cookie de refresh + anti-CSRF | Revoga a sessão correspondente e remove os cookies. |
 | `POST /api/auth/logout-all` | Autenticado | Revoga todas as sessões do usuário. |
 | `GET /api/auth/sessions` | Autenticado | Lista somente as próprias sessões. |
 | `GET /api/auth/sessions/current` | Autenticado | Retorna a sessão atual. |
@@ -26,13 +29,17 @@ Este guia cobre autenticação, sessões, organizações, unidades, usuários, p
 | `POST /api/auth/password/recovery` | Público | Retorna resposta neutra para evitar enumeração de contas. |
 | `POST /api/auth/password/reset` | Token de recuperação | Consome o token e redefine a senha. |
 
-Access tokens são enviados em `Authorization: Bearer <token>`. Refresh tokens são credenciais sensíveis, devem ser armazenados de forma protegida pelo cliente e nunca registrados em logs.
+Access tokens são enviados em `Authorization: Bearer <token>` e todo token novo contém a claim padrão `sid`, vinculada ao identificador da sessão que o originou. `GET /api/auth/sessions/current` resolve a sessão por usuário + `sid` e somente retorna uma sessão ativa pertencente ao usuário. Revogar outra sessão não muda essa identificação.
+
+Tokens legados sem `sid` usam temporariamente a sessão ativa mais recente do mesmo usuário e unidade. Essa compatibilidade existe apenas para os tokens já emitidos e desaparece naturalmente após o tempo máximo de vida do access token mais a tolerância de relógio; nenhum token novo é emitido sem `sid`.
+
+No cliente web, refresh tokens ficam exclusivamente no cookie `HttpOnly`; não são retornados em JSON nem acessíveis ao JavaScript. O access token fica somente em memória. O mecanismo de CSRF, recarregamento, múltiplas abas, logout e evolução para BFF está em [`../security/web-session.md`](../security/web-session.md).
 
 ## Seleção e criação de unidade
 
 `GET /api/tenants/accessible` retorna apenas vínculos e unidades ativos. `POST /api/tenants` cria uma unidade: quando não existe organização no contexto, também cria a organização e seus papéis padrão; quando existe, inclui a unidade na mesma organização. O criador recebe o vínculo de proprietário e um token contextual.
 
-`POST /api/tenants/select`, `POST /api/tenants/switch` e `POST /api/auth/select-tenant` exigem vínculo ativo. As duas rotas `select` e `switch` são aliases compatíveis. Quando um refresh token ativo é informado, ele é rotacionado e o novo token fica associado à unidade selecionada.
+`POST /api/auth/select-tenant` é a operação canônica. Ela exige vínculo ativo, cookie de refresh e proteção anti-CSRF; revoga a sessão anterior e associa o cookie substituto à unidade selecionada na mesma transação. `POST /api/tenants/select` e `POST /api/tenants/switch` usam exatamente o mesmo serviço por compatibilidade, estão marcadas como deprecated no OpenAPI e serão removidas depois da migração do cliente web.
 
 ## Usuários e papéis da unidade
 
@@ -62,10 +69,35 @@ Entitlements não são papéis. Eles representam limites parametrizáveis, como 
 
 ## Erros relevantes
 
-- `401`: autenticação ou sessão inválida.
-- `403`: ausência de vínculo, permissão ou escopo; inclui tentativa de escalada.
-- `400`: payload, módulo ou combinação de escopo inválida.
-- `404`: identidade, papel, atribuição ou recurso não encontrado no contexto.
-- `409`: duplicidade, usuário inativo/interno, último administrador ou conflito de estado.
+Erros de autenticação usam sempre o envelope abaixo. O frontend deve tomar decisões pelo `code`, não pelo texto, que pode ser traduzido. `field` aparece apenas quando o erro pertence a uma propriedade.
+
+```json
+{
+  "errors": [
+    {
+      "code": "password_policy_failed",
+      "message": "A senha não atende aos requisitos.",
+      "field": "newPassword"
+    }
+  ]
+}
+```
+
+| Código | HTTP | Uso |
+| --- | --- | --- |
+| `validation_error` | 400 | JSON ou campo inválido. |
+| `csrf_validation_failed` | 400 | Cookie/header anti-CSRF ausente ou divergente. |
+| `password_policy_failed` | 400 | Um ou mais requisitos de senha não foram atendidos. |
+| `password_reset_invalid` | 400 | Link de recuperação inválido, usado ou expirado. |
+| `invalid_credentials` | 401 | Login, usuário inativo/bloqueado e senha incorreta usam o mesmo código público. |
+| `session_invalid` | 401 | Sessão ausente, inválida, revogada ou expirada. |
+| `unit_access_denied` | 403 | Usuário não possui acesso à unidade ou operação. |
+| `session_not_found` | 404 | Sessão própria solicitada não existe. |
+| `email_verification_invalid` | 400 | Link de confirmação inválido, expirado ou já consumido. |
+| `organization_name_invalid` | 400 | Nome da organização inválido. |
+| `unit_name_invalid` / `unit_name_conflict` | 400 / 409 | Nome da unidade inválido ou já utilizado. |
+| `rate_limit_exceeded` | 429 | Limite temporário excedido; respeitar `Retry-After`. |
+
+Recuperação de senha continua retornando a mesma resposta `202` para e-mail existente ou inexistente. Erros internos, credenciais, tokens e detalhes de bloqueio não são expostos.
 
 O documento OpenAPI em `/openapi/v1.json` contém schemas, parâmetros e metadados de acesso de cada operação. A interface `/docs` fica disponível apenas em desenvolvimento.

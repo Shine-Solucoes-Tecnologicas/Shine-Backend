@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi;
+using Shine.Api.Controllers;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace Shine.Api;
@@ -21,6 +22,7 @@ public static class OpenApiConfiguration
                 Description = "Contrato HTTP da plataforma Shine."
             });
             options.CustomSchemaIds(SchemaId);
+            options.SchemaFilter<WebSessionOpenApiSchemaFilter>();
             options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.Http,
@@ -68,6 +70,29 @@ public static class OpenApiConfiguration
     }
 }
 
+public sealed class WebSessionOpenApiSchemaFilter : ISchemaFilter
+{
+    private static readonly HashSet<Type> CookieOnlyContracts =
+    [
+        typeof(LoginResponse),
+        typeof(EmailVerificationConfirmationResponse),
+        typeof(RefreshResponse),
+        typeof(TenantSelectionResponse),
+        typeof(RefreshRequest),
+        typeof(SelectTenantRequest),
+        typeof(TenantSelectionRequest)
+    ];
+
+    public void Apply(IOpenApiSchema schema, SchemaFilterContext context)
+    {
+        if (!CookieOnlyContracts.Contains(context.Type) || schema.Properties is null) return;
+        var refreshProperty = schema.Properties.Keys
+            .SingleOrDefault(key => string.Equals(key, "refreshToken", StringComparison.OrdinalIgnoreCase));
+        if (refreshProperty is not null) schema.Properties.Remove(refreshProperty);
+        schema.Required?.Remove(refreshProperty ?? string.Empty);
+    }
+}
+
 public sealed class AuxiliaryCapabilitiesOpenApiOperationFilter : IOperationFilter
 {
     private static readonly IReadOnlyDictionary<string, AuxiliaryOperationDocumentation> Operations =
@@ -89,8 +114,9 @@ public sealed class AuxiliaryCapabilitiesOpenApiOperationFilter : IOperationFilt
             ["NotificationsController.MarkAllAsRead"] = new("Marcar todas como lidas", "Registra de forma idempotente a leitura de todas as notificações visíveis."),
             ["DashboardController.GetWidgets"] = new("Listar widgets disponíveis", "Resolve widgets conforme módulos e permissões efetivas do usuário."),
             ["DashboardController.GetWidgetData"] = new("Consultar dados do widget", "Retorna dados somente se o widget estiver disponível ao usuário no período válido.", ["400", "404"]),
-            ["DashboardController.GetLayout"] = new("Consultar layout do dashboard", "Resolve o layout salvo contra o catálogo de widgets atualmente disponível.", ["404"]),
-            ["DashboardController.SaveLayout"] = new("Salvar layout do dashboard", "Valida e persiste o layout do usuário na unidade.", ["400"]),
+            ["DashboardController.GetLayout"] = new("Consultar layout do dashboard", "Resolve sempre o layout efetivo pela precedência `user -> tenant -> system`, incluindo origem, versão esperada e manifesto."),
+            ["DashboardController.SaveLayout"] = new("Salvar layout do dashboard", "Valida e persiste o layout do usuário na unidade somente quando `expectedVersion` ainda corresponde à versão atual.", ["400", "409"]),
+            ["DashboardController.ResetLayout"] = new("Restaurar layout padrão", "Remove apenas a personalização do usuário atual e resolve novamente o padrão vigente do tenant ou do sistema.", ["409"]),
             ["FunctionalSettingsController.Get"] = new("Consultar configuração funcional", "Resolve a configuração efetiva da unidade sem alterar valores.", ["404"]),
             ["FunctionalSettingsController.Set"] = new("Definir configuração funcional", "Define valor parametrizado para a unidade atual."),
             ["FeatureFlagsController.Get"] = new("Consultar Feature Flags", "Retorna flags efetivas no contexto da unidade."),
@@ -155,25 +181,26 @@ public sealed class SchedulingOpenApiOperationFilter : IOperationFilter
     private static readonly IReadOnlyDictionary<string, SchedulingOperationDocumentation> Operations =
         new Dictionary<string, SchedulingOperationDocumentation>(StringComparer.Ordinal)
         {
+            ["GetProfessionalCapacity"] = new("Consultar capacidade efetiva do profissional", "Retorna capacidade efetiva, padrão, origem default/override e intervalo da grade; qualquer ocupação parcial consome o bucket inteiro.", ["404"]),
             ["UpdateProfessionalCapacity"] = new("Configurar capacidade do profissional", "Define o máximo de agendamentos simultâneos do profissional, entre 1 e 100.", ["400", "404"]),
             ["UpdateServiceDurationPolicy"] = new("Configurar duração variável do serviço", "Define regra versionada por atributo ou restaura a duração fixa do Business Catalog.", ["400", "404"]),
             ["UpdateProfessionalServiceDuration"] = new("Configurar duração específica do profissional", "Define ou remove override de duração para um vínculo profissional–serviço ativo.", ["400", "404"]),
             ["Availability"] = new("Listar disponibilidade recorrente", "Retorna regras ativas do profissional na unidade."),
-            ["AddAvailability"] = new("Adicionar disponibilidade recorrente", "Cria regra semanal quando não há sobreposição com outra regra ativa.", ["404", "409"]),
+            ["AddAvailability"] = new("Adicionar disponibilidade recorrente", "Cria regra semanal quando não há sobreposição com outra regra ativa.", ["400", "404"]),
             ["RemoveAvailability"] = new("Remover disponibilidade recorrente", "Desativa a regra, preservando seu registro.", ["404"]),
-            ["AddBlock"] = new("Adicionar bloqueio de agenda", "Bloqueia um período UTC do profissional quando não há outro bloqueio sobreposto.", ["404", "409"]),
+            ["AddBlock"] = new("Adicionar bloqueio de agenda", "Bloqueia um período UTC do profissional quando não há outro bloqueio sobreposto.", ["400", "404"]),
             ["Exceptions"] = new("Listar exceções de disponibilidade", "Retorna exceções integrais ou parciais, com filtros opcionais por data."),
-            ["AddException"] = new("Adicionar exceção de disponibilidade", "Cria indisponibilidade integral ou janela excepcional sem sobreposição na mesma data.", ["404", "409"]),
+            ["AddException"] = new("Adicionar exceção de disponibilidade", "Cria indisponibilidade integral ou janela excepcional sem sobreposição na mesma data.", ["400", "404"]),
             ["RemoveException"] = new("Remover exceção de disponibilidade", "Exclui a exceção identificada dentro da unidade.", ["404"]),
             ["GetSettings"] = new("Consultar configurações da agenda", "Retorna intervalo dos slots, buffers, fuso, política de conflito e capacidade padrão."),
             ["UpdateSettings"] = new("Atualizar configurações da agenda", "Valida e persiste intervalo, buffers, fuso, conflito e capacidade padrão.", ["400"]),
-            ["Slots"] = new("Consultar slots disponíveis", "Calcula slots em UTC a partir de catálogo, fuso, duração, regras, exceções, bloqueios, ocupação e capacidade.", ["404"]),
+            ["Slots"] = new("Consultar slots disponíveis", "Calcula slots autoritativos em UTC a partir da grade local; omite horários inexistentes e preserva as duas ocorrências de horários ambíguos com offset.", ["404"]),
             ["Appointments"] = new("Listar agendamentos", "Retorna página ordenada de agendamentos que intersectam o período UTC informado."),
             ["CreateAppointment"] = new("Criar agendamento", "Valida catálogo, cliente, duração, bloqueios, conflitos, capacidade e reserva do entitlement de agendamentos ativos.", ["400", "404", "409"]),
             ["ChangeAppointmentStatus"] = new("Alterar estado do agendamento", "Aplica transição válida, publica evento e reserva ou libera o entitlement conforme o novo estado.", ["404", "409"]),
             ["RescheduleAppointment"] = new("Reagendar atendimento", "Usa ExpectedVersion, lock por profissional e valida conflitos antes de publicar o reagendamento.", ["404", "409"]),
             ["CreateAppointmentPublic"] = new("Criar agendamento público", "Revalida o slot sob lock, limita capacidade e reserva entitlement antes de persistir e publicar o evento.", ["400", "404", "409", "429"]),
-            ["SlotsPublic"] = new("Consultar slots públicos", "Calcula slots para profissional e serviço ativos sem expor dados de outros agendamentos.", ["400", "404", "429"])
+            ["SlotsPublic"] = new("Consultar slots públicos", "Usa o mesmo cálculo autoritativo do fluxo autenticado, incluindo capacidade por buckets e expansão de horários locais ambíguos.", ["400", "404", "429"])
         };
 
     public void Apply(OpenApiOperation operation, OperationFilterContext context)
@@ -206,6 +233,57 @@ public sealed class SchedulingOpenApiOperationFilter : IOperationFilter
         operation.Responses ??= new OpenApiResponses();
         foreach (var status in documentation.AdditionalResponses)
             operation.Responses.TryAdd(status, new OpenApiResponse { Description = ResponseDescription(status) });
+        ConfigureConflictContracts(operation, context);
+    }
+
+    private static void ConfigureConflictContracts(OpenApiOperation operation, OperationFilterContext context)
+    {
+        if (context.MethodInfo.Name is not ("CreateAppointment" or "ChangeAppointmentStatus" or "RescheduleAppointment")) return;
+
+        var conflictTypes = new (string Code, Type Type)[]
+        {
+            (SchedulingProblemCodes.AppointmentConflict, typeof(SchedulingProblemContract<AppointmentConflictDetails>)),
+            (SchedulingProblemCodes.CapacityExceeded, typeof(SchedulingProblemContract<CapacityExceededDetails>)),
+            (SchedulingProblemCodes.ScheduleBlocked, typeof(SchedulingProblemContract<ScheduleBlockedDetails>)),
+            (SchedulingProblemCodes.InvalidAppointmentTransition, typeof(SchedulingProblemContract<InvalidAppointmentTransitionDetails>)),
+            (SchedulingProblemCodes.SlotUnavailable, typeof(SchedulingProblemContract<SlotUnavailableDetails>))
+        };
+        operation.Responses!["409"] = ProblemResponse(
+            "Conflito de agenda classificado pelo campo code.", conflictTypes, context);
+
+        if (context.MethodInfo.Name == "RescheduleAppointment")
+            operation.Responses["412"] = ProblemResponse(
+                "A versão informada do agendamento está obsoleta.",
+                [(SchedulingProblemCodes.StaleAppointment, typeof(SchedulingProblemContract<StaleAppointmentDetails>))], context);
+    }
+
+    private static OpenApiResponse ProblemResponse(
+        string description,
+        IReadOnlyCollection<(string Code, Type Type)> variants,
+        OperationFilterContext context)
+    {
+        var generated = variants
+            .Select(variant => (variant.Code, Schema: context.SchemaGenerator.GenerateSchema(variant.Type, context.SchemaRepository)))
+            .ToArray();
+        var schema = new OpenApiSchema
+        {
+            OneOf = generated.Select(variant => (IOpenApiSchema)variant.Schema).ToList(),
+            Discriminator = new OpenApiDiscriminator
+            {
+                PropertyName = "code",
+                Mapping = generated
+                    .Where(variant => variant.Schema is OpenApiSchemaReference)
+                    .ToDictionary(variant => variant.Code, variant => (OpenApiSchemaReference)variant.Schema, StringComparer.Ordinal)
+            }
+        };
+        return new OpenApiResponse
+        {
+            Description = description,
+            Content = new Dictionary<string, OpenApiMediaType>
+            {
+                ["application/problem+json"] = new() { Schema = schema }
+            }
+        };
     }
 
     private static string ResponseDescription(string status) => status switch
@@ -213,6 +291,7 @@ public sealed class SchedulingOpenApiOperationFilter : IOperationFilter
         "400" => "Período, duração, configuração, referência ou atributos inválidos.",
         "404" => "Recurso ausente na unidade ou módulo de Scheduling indisponível.",
         "409" => "Sobreposição, capacidade, conflito, entitlement ou versão concorrente impede a operação.",
+        "412" => "A versão informada do agendamento está obsoleta.",
         "429" => "Limite público de 30 requisições por minuto para o IP efetivo e a unidade excedido.",
         _ => "Resposta de erro documentada."
     };
@@ -348,25 +427,50 @@ public sealed class BillingOpenApiOperationFilter : IOperationFilter
 
 public sealed class IdentityAccessOpenApiOperationFilter : IOperationFilter
 {
+    private static readonly IReadOnlyDictionary<string, string[]> ErrorStatuses =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["POST api/auth/register"] = ["400", "429"],
+            ["POST api/auth/email-verification/resend"] = ["429"],
+            ["POST api/auth/email-verification/confirm"] = ["400", "429"],
+            ["POST api/auth/login"] = ["401", "429"],
+            ["POST api/auth/refresh"] = ["400", "401", "429"],
+            ["POST api/auth/logout"] = ["400"],
+            ["POST api/auth/logout-all"] = ["401"],
+            ["GET api/auth/sessions"] = ["401"],
+            ["GET api/auth/sessions/current"] = ["401", "404"],
+            ["DELETE api/auth/sessions/{sessionId}"] = ["401", "404"],
+            ["POST api/auth/select-tenant"] = ["400", "401", "403"],
+            ["POST api/auth/change-password"] = ["400", "401"],
+            ["POST api/auth/password/recovery"] = ["429"],
+            ["POST api/auth/password/reset"] = ["400", "429"],
+            ["POST api/tenants"] = ["400", "401", "409"],
+            ["POST api/tenants/select"] = ["400", "401", "403"],
+            ["POST api/tenants/switch"] = ["400", "401", "403"]
+        };
+
     private static readonly IReadOnlyDictionary<string, IdentityAccessOperationDocumentation> Operations =
         new Dictionary<string, IdentityAccessOperationDocumentation>(StringComparer.OrdinalIgnoreCase)
         {
-            ["POST api/auth/register"] = new("Registrar usuário", "Público", "Cria uma identidade sem conceder acesso a unidades."),
-            ["POST api/auth/login"] = new("Autenticar usuário", "Público", "Valida credenciais e inicia uma sessão; o contexto de unidade depende dos vínculos acessíveis."),
-            ["POST api/auth/refresh"] = new("Renovar sessão", "Público, mediante refresh token ativo", "Rotaciona o refresh token e invalida o token reutilizado."),
-            ["POST api/auth/logout"] = new("Encerrar sessão", "Público, mediante refresh token", "Revoga a sessão correspondente quando o token é reconhecido."),
+            ["GET api/auth/csrf"] = new("Preparar proteção CSRF", "Público", "Emite o token anti-CSRF legível pelo cliente; não cria nem expõe uma sessão."),
+            ["POST api/auth/register"] = new("Criar organização e primeira unidade", "Público", "Provisiona identidade não verificada, organização, primeira unidade, papéis iniciais e plano padrão; responde de forma neutra sem criar sessão."),
+            ["POST api/auth/email-verification/resend"] = new("Reenviar confirmação de e-mail", "Público", "Responde de forma neutra e emite novo desafio somente quando aplicável."),
+            ["POST api/auth/email-verification/confirm"] = new("Confirmar e-mail", "Público, mediante token válido", "Consome o desafio uma única vez, verifica a identidade e cria a primeira sessão contextual em cookie HttpOnly."),
+            ["POST api/auth/login"] = new("Autenticar usuário", "Público", "Valida credenciais, devolve o access token e grava o refresh token em cookie HttpOnly; a claim sid identifica a sessão criada."),
+            ["POST api/auth/refresh"] = new("Renovar sessão", "Cookie de refresh ativo e header X-XSRF-TOKEN", "Rotaciona o refresh token atomicamente, substitui o cookie e devolve somente o novo access token."),
+            ["POST api/auth/logout"] = new("Encerrar sessão", "Cookie de refresh e header X-XSRF-TOKEN", "Revoga a sessão correspondente e remove os cookies de sessão."),
             ["POST api/auth/logout-all"] = new("Encerrar todas as sessões", "Usuário autenticado", "Revoga todas as sessões ativas do usuário."),
             ["GET api/auth/sessions"] = new("Listar sessões", "Usuário autenticado", "Lista somente as sessões pertencentes ao usuário autenticado."),
-            ["GET api/auth/sessions/current"] = new("Consultar sessão atual", "Usuário autenticado", "Retorna a sessão identificada pelo token atual."),
+            ["GET api/auth/sessions/current"] = new("Consultar sessão atual", "Usuário autenticado", "Retorna exatamente a sessão ativa indicada pela claim sid do token atual; tokens legados usam compatibilidade temporária."),
             ["DELETE api/auth/sessions/{sessionId}"] = new("Revogar sessão", "Usuário autenticado", "Revoga uma sessão do próprio usuário; não permite atuar sobre sessões alheias."),
-            ["POST api/auth/select-tenant"] = new("Selecionar unidade na sessão", "Usuário autenticado e vínculo ativo com a unidade", "Emite token limitado à unidade selecionada e pode rotacionar o refresh token."),
+            ["POST api/auth/select-tenant"] = new("Selecionar unidade na sessão", "Usuário autenticado, vínculo ativo, cookie de refresh e header X-XSRF-TOKEN", "Emite token limitado à unidade selecionada e rotaciona o refresh token."),
             ["POST api/auth/change-password"] = new("Alterar senha", "Usuário autenticado", "Troca a senha e revoga as demais sessões conforme a política de identidade."),
             ["POST api/auth/password/recovery"] = new("Solicitar recuperação de senha", "Público", "Produz resposta neutra para evitar enumeração de usuários e inicia a recuperação quando aplicável."),
             ["POST api/auth/password/reset"] = new("Redefinir senha", "Público, mediante token de recuperação válido", "Consome o token, redefine a senha e invalida sessões conforme a política de identidade."),
 
             ["GET api/tenants/accessible"] = new("Listar unidades acessíveis", "Usuário autenticado", "Retorna apenas vínculos ativos com unidades ativas."),
             ["POST api/tenants"] = new("Criar unidade", "Usuário autenticado", "Cria a unidade, vincula-a à organização atual ou a uma nova organização e emite um token para o proprietário."),
-            ["POST api/tenants/select"] = new("Selecionar unidade", "Usuário autenticado e vínculo ativo com a unidade", "Emite token no contexto da unidade e rotaciona o refresh token quando informado."),
+            ["POST api/tenants/select"] = new("Selecionar unidade", "Usuário autenticado, vínculo ativo, cookie de refresh e header X-XSRF-TOKEN", "Emite token no contexto da unidade e rotaciona o refresh token."),
             ["POST api/tenants/switch"] = new("Trocar de unidade", "Usuário autenticado e vínculo ativo com a unidade", "Alias compatível da seleção de unidade; aplica as mesmas validações e rotação."),
 
             ["GET api/tenants/users"] = new("Listar usuários da unidade", "Permissão `users.read` na unidade atual", "Retorna somente usuários vinculados ao contexto autorizado."),
@@ -400,6 +504,37 @@ public sealed class IdentityAccessOpenApiOperationFilter : IOperationFilter
         operation.OperationId = $"Access_{context.MethodInfo.DeclaringType?.Name.Replace("Controller", string.Empty)}_{context.MethodInfo.Name}_{method}";
         operation.Summary = documentation.Summary;
         operation.Description = $"Acesso exigido: {documentation.Access}.\n\nEfeito operacional: {documentation.OperationalEffect}";
+        ConfigureErrorResponses(operation, context, $"{method} {path}");
+        if (path is "api/tenants/select" or "api/tenants/switch")
+        {
+            operation.Deprecated = true;
+            operation.Description += "\n\nDeprecated: use `POST /api/auth/select-tenant`. O alias será removido após a migração do cliente web.";
+        }
+    }
+
+    private static void ConfigureErrorResponses(
+        OpenApiOperation operation,
+        OperationFilterContext context,
+        string operationKey)
+    {
+        if (!ErrorStatuses.TryGetValue(operationKey, out var statuses)) return;
+        var schema = context.SchemaGenerator.GenerateSchema(typeof(AuthenticationErrorResponse), context.SchemaRepository);
+        operation.Responses ??= new OpenApiResponses();
+        foreach (var status in statuses)
+        {
+            var description = operation.Responses.TryGetValue(status, out var existing)
+                ? existing.Description
+                : $"Erro de autenticação HTTP {status}.";
+            operation.Responses[status] = new OpenApiResponse
+            {
+                Description = description,
+                Content = new Dictionary<string, OpenApiMediaType>
+                {
+                    ["application/json"] = new() { Schema = schema }
+                }
+            };
+        }
+        operation.Description += "\n\nErros usam `{ errors: [{ code, message, field? }] }`; `code` é estável e o texto pode ser apresentado ou traduzido pelo cliente.";
     }
 
     private static string? NormalizePath(string? relativePath)

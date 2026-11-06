@@ -171,7 +171,7 @@ public sealed class BusinessCatalogApiTests(DatabaseFixture fixture)
     {
         var options = Options.Create(new JwtOptions { Secret = JwtSecret, Issuer = "Shine", Audience = "Shine.Api", AccessTokenMinutes = 5 });
         var service = new JwtAccessTokenService(options, new JwtSigningKeyRing(options));
-        return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, []).Token);
+        return new AuthenticationHeaderValue("Bearer", service.Create(userId, Guid.NewGuid(), tenantId, userTenantId, []).Token);
     }
 
     private sealed record AccessData(User Editor, User Viewer, CustomerAccount Account, Tenant Unit, UserTenant EditorMembership, UserTenant ViewerMembership);

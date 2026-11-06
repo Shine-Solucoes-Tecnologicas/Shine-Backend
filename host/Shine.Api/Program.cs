@@ -26,6 +26,9 @@ builder.Services.AddControllers();
 builder.Services.AddShineOpenApi();
 builder.Services.AddScoped<AppointmentEntitlementReconciliationService>();
 builder.Services.AddScoped<ISchedulingScopeAuthorization, SchedulingScopeAuthorization>();
+builder.Services.AddScoped<TenantSessionSelectionService>();
+builder.Services.AddSingleton<IDemoDataTargetGuard, DemoDataTargetGuard>();
+builder.Services.AddScoped<DemoDataSeeder>();
 builder.Services.AddHostedService<AppointmentEntitlementReconciliationWorker>();
 builder.Services.AddHostedService<StoredFileDeletionWorker>();
 builder.Services.AddApiSecurityConfiguration(builder.Configuration, builder.Environment);
@@ -36,6 +39,13 @@ builder.Services.AddRateLimiter(options => options.AddPolicy("public-scheduling"
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddShineJwtAuthentication();
 builder.Services.AddSingleton<IPasswordRecoveryMessageTemplate, PasswordRecoveryMessageTemplate>();
+builder.Services.Configure<EmailVerificationOptions>(builder.Configuration.GetSection("EmailVerification"));
+builder.Services.AddSingleton<IEmailVerificationMessageTemplate, EmailVerificationMessageTemplate>();
+builder.Services.AddScoped<EmailVerificationChallengeService>();
+if (builder.Configuration.GetValue<bool>("EmailVerification:MockDelivery"))
+    builder.Services.AddSingleton<IEmailVerificationDelivery, InMemoryEmailVerificationDelivery>();
+else
+    builder.Services.AddSingleton<IEmailVerificationDelivery, NullEmailVerificationDelivery>();
 if (builder.Configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
     builder.Services.AddSingleton<IPasswordRecoveryDelivery, InMemoryPasswordRecoveryDelivery>();
 else
@@ -49,13 +59,30 @@ builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options 
 {
     options.InvalidModelStateResponseFactory = context =>
     {
-        var errors = context.ModelState.Values.SelectMany(value => value.Errors)
-            .Select(error => new { code = "validation_error", message = error.ErrorMessage ?? "The supplied value is invalid." });
-        return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(new { errors });
+        var errors = context.ModelState.SelectMany(entry => entry.Value?.Errors.Select(_ =>
+            new AuthenticationErrorItem(
+                AuthenticationErrors.Validation,
+                "O valor informado é inválido.",
+                NormalizeField(entry.Key))) ?? []);
+        return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(new AuthenticationErrorResponse(errors.ToArray()));
     };
 });
 
+static string? NormalizeField(string field)
+{
+    if (string.IsNullOrWhiteSpace(field)) return null;
+    var name = field.Split('.').Last();
+    return name.Length == 0 ? null : char.ToLowerInvariant(name[0]) + name[1..];
+}
+
 var app = builder.Build();
+
+if (args is ["--demo-data", "seed"])
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<DemoDataSeeder>().SeedAsync();
+    return;
+}
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<NullRemoteForwardedHeadersGuardMiddleware>();

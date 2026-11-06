@@ -14,17 +14,21 @@ O PostgreSQL do projeto roda via Docker Compose na porta `5433` do Windows,
 evitando conflito com uma instalação local na porta `5432`.
 
 ```powershell
-docker compose up -d
-docker compose ps
-docker exec shine-backend-postgres-1 pg_isready -U shine -d shine
-$env:ConnectionStrings__ShineDb = 'Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine'
-dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api
-dotnet run --project host/Shine.Api
+./scripts/Local-Environment.ps1 -Action Prepare
+./scripts/Local-Environment.ps1 -Action RunApi
 ```
 
-O `appsettings.Development.json` usa essa mesma porta. Uma variável de ambiente continua tendo precedência quando for necessário apontar para outro banco.
+`Prepare` verifica a disponibilidade do banco e aplica os quatro contextos na ordem documentada em [`runtime-and-operations.md`](runtime-and-operations.md). O script pode ser executado novamente com segurança; o EF aplica somente migrations pendentes. Use `-Action Check` para diagnosticar a dependência antes das suítes e `-Action Stop` para parar os containers sem remover dados.
+
+O Compose local e o CI usam PostgreSQL 17. O `appsettings.Development.json` usa a porta local `5433`. Uma variável de ambiente continua tendo precedência quando for necessário apontar para outro banco.
 
 O arquivo `.env.example` contém apenas nomes e valores ilustrativos. Segredos locais devem permanecer fora do controle de versão.
+
+## Dataset de demonstração
+
+`scripts/Demo-Data.ps1` prepara dados fictícios somente em `localhost/shine_demo`. A senha das contas é obrigatória como `SecureString` e chega ao processo pela variável temporária `DemoData__Password`; ela nunca possui default versionado. O comando interno também exige `ASPNETCORE_ENVIRONMENT=Development` e `DemoData__Enabled=true`.
+
+O reset exige `-ConfirmReset shine_demo`, remove somente esse banco local e o recria por meio do bootstrap normal. Outros nomes de banco, hosts remotos e ambientes não Development são recusados antes do seed.
 
 ## Recuperação de senha em desenvolvimento
 
@@ -34,7 +38,9 @@ Os logs registram apenas que uma entrega foi preparada para o endereço informad
 
 ## Rate limiting da autenticação
 
-Login, cadastro, refresh e recuperação de senha possuem limites de janela fixa independentes. Os valores são configurados em `AuthenticationRateLimiting` e podem ser substituídos por ambiente, por exemplo:
+Login, cadastro, confirmação/reenvio de e-mail, refresh e recuperação de senha possuem limites de janela fixa independentes. Os valores são configurados em `AuthenticationRateLimiting` e podem ser substituídos por ambiente.
+
+Em produção, `WebSession:PublicApiOrigin` deve conter a origem HTTPS pública da API e `WebSession:SiteDomain` o domínio registrável compartilhado com todas as origens de `Cors:AllowedOrigins`. Configurações cross-site falham na inicialização porque os cookies usam `SameSite=Lax`.
 
 ```text
 AuthenticationRateLimiting__Login__PermitLimit=10
@@ -49,10 +55,12 @@ As origens do frontend são configuradas em `Cors:AllowedOrigins`. Cada entrada 
 
 ```text
 Cors__AllowedOrigins__0=https://app.example.com
-Cors__AllowCredentials=false
+Cors__AllowCredentials=true
 ```
 
-Localhost fica restrito ao arquivo de configuração de Development. Credenciais permanecem desabilitadas por padrão e nunca podem ser combinadas com origem irrestrita.
+Localhost fica restrito ao arquivo de configuração de Development. Credenciais são necessárias para o cookie de sessão web e nunca podem ser combinadas com origem irrestrita. `WebSession__AllowLegacyBodyTransport` deve permanecer `false`; produção rejeita sua ativação.
+
+O contrato completo do cookie, do header anti-CSRF e da futura evolução para BFF está em [`security/web-session.md`](security/web-session.md).
 
 ## JWT e rotação de chaves
 

@@ -35,11 +35,14 @@ public static class DependencyInjection
             .Validate(options => JwtSigningKeyRing.TryValidate(options, out _), "JWT configuration is invalid.")
             .ValidateOnStart();
         services.AddOptions<LoginSecurityOptions>().BindConfiguration("LoginSecurity");
+        services.AddOptions<SecurityFingerprintOptions>().BindConfiguration("SecurityEvents:Fingerprinting");
+        services.AddSingleton<IAuthenticationSecurityEventBuilder, AuthenticationSecurityEventBuilder>();
+        services.AddScoped<IAuthenticationSecurityEventEmitter, AuthenticationSecurityEventEmitter>();
         services.AddSingleton<JwtSigningKeyRing>();
         services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
         services.AddSingleton<IModuleCatalog>(_ => CreateModuleCatalog());
         services.AddSingleton<IDashboardWidgetProvider>(new EmptyDashboardWidgetProvider(new DashboardWidgetDescriptor(
-            "core.welcome", "CORE", "Visão geral", "Resumo da organização", "dashboard.read", dataSource: "core")));
+            "core.welcome", "CORE", "Visão geral", "Resumo da organização", "dashboard.read", dataSource: "core", defaultOrder: 0)));
         services.AddScoped<IDashboardWidgetCatalog>(provider => CreateDashboardWidgetCatalog(provider.GetServices<IDashboardWidgetProvider>()));
         services.AddScoped<IDashboardWidgetResolver, DashboardWidgetResolver>();
         services.AddScoped<DashboardLayoutService>();

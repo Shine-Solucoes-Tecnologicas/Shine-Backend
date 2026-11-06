@@ -14,11 +14,20 @@ public sealed class DashboardLayout : AuditableEntity, IMultiTenantEntity
     public string DashboardKey { get; private set; } = null!;
     public int Version { get; private set; }
     public ICollection<DashboardWidgetPlacement> Placements { get; private set; } = new List<DashboardWidgetPlacement>();
+    public void AdvanceVersion() => Version++;
     public void ReplacePlacements(IEnumerable<DashboardWidgetPlacement> placements)
     {
         var values = placements.ToArray();
         Validate(values);
-        Placements.Clear(); foreach (var placement in values) Placements.Add(placement);
+        var replacements = values.ToDictionary(x => x.WidgetKey, StringComparer.OrdinalIgnoreCase);
+        foreach (var removed in Placements.Where(x => !replacements.ContainsKey(x.WidgetKey)).ToArray())
+            Placements.Remove(removed);
+        foreach (var replacement in values)
+        {
+            var existing = Placements.SingleOrDefault(x => string.Equals(x.WidgetKey, replacement.WidgetKey, StringComparison.OrdinalIgnoreCase));
+            if (existing is null) Placements.Add(replacement);
+            else existing.UpdateFrom(replacement);
+        }
         Version++;
     }
     private static string Normalize(string value) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Dashboard key is required.", nameof(value)) : value.Trim().ToUpperInvariant();
@@ -52,6 +61,16 @@ public sealed class DashboardWidgetPlacement
     public int Height { get; private set; }
     public bool IsVisible { get; private set; }
     public string SettingsJson { get; private set; } = "{}";
+    internal void UpdateFrom(DashboardWidgetPlacement replacement)
+    {
+        ModuleKey = replacement.ModuleKey;
+        PositionX = replacement.PositionX;
+        PositionY = replacement.PositionY;
+        Width = replacement.Width;
+        Height = replacement.Height;
+        IsVisible = replacement.IsVisible;
+        SettingsJson = replacement.SettingsJson;
+    }
     public bool Intersects(DashboardWidgetPlacement other) => PositionX < other.PositionX + other.Width && PositionX + Width > other.PositionX && PositionY < other.PositionY + other.Height && PositionY + Height > other.PositionY;
     private static string Normalize(string value) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Widget key is required.") : value.Trim().ToUpperInvariant();
 }

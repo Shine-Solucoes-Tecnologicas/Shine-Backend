@@ -15,10 +15,18 @@ public static class ProductionConfigurationValidation
         if (!environment.IsProduction()) return;
 
         ValidateDatabase(configuration.GetConnectionString("ShineDb"));
-        ValidateJwt(configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions());
+        var jwt = configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+        ValidateJwt(jwt);
+        ValidateSecurityFingerprints(configuration.GetSection("SecurityEvents:Fingerprinting").Get<SecurityFingerprintOptions>() ?? new SecurityFingerprintOptions(), jwt);
         ValidateRabbitMq(configuration.GetSection("RabbitMq").Get<RabbitMqOptions>() ?? new RabbitMqOptions());
+        if (!configuration.GetValue<bool>("Cors:AllowCredentials"))
+            Fail("Cors:AllowCredentials must be enabled in Production for the web session cookie.");
+        if (configuration.GetValue<bool>("WebSession:AllowLegacyBodyTransport"))
+            Fail("WebSession:AllowLegacyBodyTransport must be disabled in Production.");
         if (configuration.GetValue<bool>("PasswordRecovery:MockDelivery"))
             Fail("PasswordRecovery:MockDelivery must be disabled in Production.");
+        if (configuration.GetValue<bool>("EmailVerification:MockDelivery"))
+            Fail("EmailVerification:MockDelivery must be disabled in Production.");
     }
 
     private static void ValidateDatabase(string? connectionString)
@@ -51,6 +59,18 @@ public static class ProductionConfigurationValidation
         if (string.IsNullOrWhiteSpace(options.HostName) || string.IsNullOrWhiteSpace(options.UserName) || IsWeak(options.Password) ||
             string.Equals(options.UserName, "guest", StringComparison.OrdinalIgnoreCase))
             Fail("RabbitMq production credentials must be explicitly configured and non-placeholder.");
+    }
+
+    private static void ValidateSecurityFingerprints(SecurityFingerprintOptions options, JwtOptions jwt)
+    {
+        if (!SecurityFingerprintOptions.TryValidate(options, out _))
+            Fail("SecurityEvents:Fingerprinting requires a valid active HMAC key ring in Production.");
+        if (options.Keys.Any(key => IsWeak(key.Secret)))
+            Fail("SecurityEvents:Fingerprinting contains a placeholder or development key.");
+        var jwtSecrets = jwt.SigningKeys.Select(key => key.Secret).Append(jwt.Secret)
+            .Where(secret => !string.IsNullOrWhiteSpace(secret)).ToHashSet(StringComparer.Ordinal);
+        if (options.Keys.Any(key => jwtSecrets.Contains(key.Secret)))
+            Fail("SecurityEvents:Fingerprinting must use keys dedicated to HMAC fingerprints, separate from JWT signing keys.");
     }
 
     private static bool IsWeak(string? value)

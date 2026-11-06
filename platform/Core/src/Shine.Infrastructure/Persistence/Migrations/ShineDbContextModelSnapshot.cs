@@ -327,6 +327,7 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -734,6 +735,39 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.ToTable("CustomerAccountUserRoleUnits");
                 });
 
+            modelBuilder.Entity("Shine.Domain.Identity.EmailVerificationToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("UsedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "UsedAtUtc");
+
+                    b.ToTable("EmailVerificationTokens");
+                });
+
             modelBuilder.Entity("Shine.Domain.Identity.PasswordResetToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -872,6 +906,9 @@ namespace Shine.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)");
+
+                    b.Property<DateTime?>("EmailVerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("FailedLoginAttempts")
                         .HasColumnType("integer");
@@ -1657,6 +1694,17 @@ namespace Shine.Infrastructure.Persistence.Migrations
                     b.Navigation("Assignment");
 
                     b.Navigation("Unit");
+                });
+
+            modelBuilder.Entity("Shine.Domain.Identity.EmailVerificationToken", b =>
+                {
+                    b.HasOne("Shine.Domain.Identity.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Shine.Domain.Identity.PasswordResetToken", b =>

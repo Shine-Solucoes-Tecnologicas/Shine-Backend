@@ -52,15 +52,42 @@ public sealed class DashboardController(DashboardLayoutService layouts, IDashboa
     {
         if (tenant.TenantId is not Guid tenantId || user.UserId is not Guid userId) return Unauthorized();
         var result = await layouts.GetResolvedAsync(tenantId, userId, dashboardKey, cancellationToken);
-        return result is null ? NotFound() : Ok(result);
+        return Ok(result);
     }
 
     [HttpPut("layout")]
     [RequiresPermission("dashboard.manage")]
+    [ProducesResponseType<DashboardLayoutResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType<StaleDashboardLayoutProblem>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<DashboardLayoutResult>> SaveLayout(DashboardLayoutRequest request, CancellationToken cancellationToken)
     {
         if (tenant.TenantId is not Guid tenantId || user.UserId is not Guid userId) return Unauthorized();
         try { return Ok(await layouts.SaveAsync(tenantId, userId, request, cancellationToken)); }
+        catch (StaleDashboardLayoutException exception)
+        {
+            return Conflict(new StaleDashboardLayoutProblem(
+                "STALE_DASHBOARD_LAYOUT",
+                "O layout foi alterado por outra sessão. Recarregue a versão atual antes de salvar novamente.",
+                exception.CurrentVersion));
+        }
         catch (ArgumentException exception) { return BadRequest(new { code = "INVALID_DASHBOARD_LAYOUT", message = exception.Message }); }
     }
+
+    [HttpPost("layout/reset")]
+    [RequiresPermission("dashboard.manage")]
+    [ProducesResponseType<DashboardLayoutResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType<StaleDashboardLayoutProblem>(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<DashboardLayoutResult>> ResetLayout(DashboardLayoutResetRequest request, CancellationToken cancellationToken)
+    {
+        if (tenant.TenantId is not Guid tenantId || user.UserId is not Guid userId) return Unauthorized();
+        try { return Ok(await layouts.ResetAsync(tenantId, userId, request, cancellationToken)); }
+        catch (StaleDashboardLayoutException exception)
+        {
+            return Conflict(new StaleDashboardLayoutProblem("STALE_DASHBOARD_LAYOUT",
+                "O layout foi alterado por outra sessão. Recarregue a versão atual antes de tentar novamente.",
+                exception.CurrentVersion));
+        }
+    }
 }
+
+public sealed record StaleDashboardLayoutProblem(string Code, string Message, int? CurrentVersion);

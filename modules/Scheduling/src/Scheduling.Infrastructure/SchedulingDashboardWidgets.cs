@@ -20,13 +20,13 @@ internal sealed class SchedulingDashboardWidgetProvider(
     public DashboardWidgetDescriptor Descriptor { get; } = kind switch
     {
         SchedulingWidgetKind.NextAppointments => new("scheduling.next-appointments", "SCHEDULING",
-            "Próximos agendamentos", "Próximos compromissos da agenda", "scheduling.read", 2, 2, 2, 1, dataSource: "scheduling.appointments"),
+            "Próximos agendamentos", "Próximos compromissos da agenda", "scheduling.read", 2, 2, 2, 1, dataSource: "scheduling.appointments", defaultOrder: 10),
         SchedulingWidgetKind.AverageOccupancy => new("scheduling.average-occupancy", "SCHEDULING",
-            "Ocupação média", "Percentual médio de ocupação da agenda no período", "scheduling.read", 2, 1, dataSource: "scheduling.availability"),
+            "Ocupação média", "Percentual médio de ocupação da agenda no período", "scheduling.read", 2, 1, dataSource: "scheduling.availability", defaultOrder: 20),
         SchedulingWidgetKind.BusiestHours => new("scheduling.busiest-hours", "SCHEDULING",
-            "Horários de maior movimento", "Faixas horárias com mais agendamentos", "scheduling.read", 2, 2, dataSource: "scheduling.appointments"),
+            "Horários de maior movimento", "Faixas horárias com mais agendamentos", "scheduling.read", 2, 2, dataSource: "scheduling.appointments", defaultOrder: 30),
         SchedulingWidgetKind.QuietestHours => new("scheduling.quietest-hours", "SCHEDULING",
-            "Horários de menor movimento", "Faixas horárias com menos agendamentos", "scheduling.read", 2, 2, dataSource: "scheduling.appointments"),
+            "Horários de menor movimento", "Faixas horárias com menos agendamentos", "scheduling.read", 2, 2, dataSource: "scheduling.appointments", defaultOrder: 40),
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 

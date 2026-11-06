@@ -42,9 +42,56 @@ public sealed class OpenApiContractTests
         Assert.Equal("http", bearer.GetProperty("type").GetString());
         Assert.Equal("bearer", bearer.GetProperty("scheme").GetString());
 
-        var schemas = components.GetProperty("schemas").EnumerateObject().Select(item => item.Name).ToArray();
+        var schemaComponents = components.GetProperty("schemas");
+        var schemas = schemaComponents.EnumerateObject().Select(item => item.Name).ToArray();
         Assert.Contains(schemas, name => name.EndsWith("CustomerErrorResponse", StringComparison.Ordinal));
         Assert.Contains(schemas, name => name.EndsWith("PagedResponse", StringComparison.Ordinal));
+        foreach (var contract in new[] { "LoginResponse", "EmailVerificationConfirmationResponse", "RefreshResponse", "TenantSelectionResponse" })
+        {
+            var schemaName = schemas.Single(name => name.EndsWith(contract, StringComparison.Ordinal));
+            Assert.False(schemaComponents.GetProperty(schemaName).GetProperty("properties")
+                .TryGetProperty("refreshToken", out _));
+        }
+
+        var registrationRequestName = schemas.Single(name => name.EndsWith("RegistrationRequest", StringComparison.Ordinal));
+        var registrationRequestProperties = schemaComponents.GetProperty(registrationRequestName).GetProperty("properties");
+        Assert.True(registrationRequestProperties.TryGetProperty("organizationName", out _));
+        Assert.True(registrationRequestProperties.TryGetProperty("unitName", out _));
+        Assert.False(registrationRequestProperties.TryGetProperty("tenantName", out _));
+
+        var dashboardSave = paths.GetProperty("/api/dashboard/layout").GetProperty("put");
+        Assert.Contains("expectedVersion", dashboardSave.GetProperty("description").GetString());
+        Assert.True(dashboardSave.GetProperty("responses").TryGetProperty("409", out var dashboardConflict));
+        Assert.Contains("StaleDashboardLayoutProblem", dashboardConflict.GetRawText());
+        var dashboardRequestName = schemas.Single(name => name.EndsWith("DashboardLayoutRequest", StringComparison.Ordinal));
+        Assert.True(schemaComponents.GetProperty(dashboardRequestName).GetProperty("properties")
+            .TryGetProperty("expectedVersion", out _));
+        var dashboardRead = paths.GetProperty("/api/dashboard/layout").GetProperty("get");
+        Assert.Contains("user -> tenant -> system", dashboardRead.GetProperty("description").GetString());
+        var dashboardReset = paths.GetProperty("/api/dashboard/layout/reset").GetProperty("post");
+        Assert.True(dashboardReset.GetProperty("responses").TryGetProperty("409", out _));
+        var dashboardResultName = schemas.Single(name => name.EndsWith("DashboardLayoutResult", StringComparison.Ordinal));
+        var dashboardResultProperties = schemaComponents.GetProperty(dashboardResultName).GetProperty("properties");
+        Assert.True(dashboardResultProperties.TryGetProperty("source", out _));
+        Assert.True(dashboardResultProperties.TryGetProperty("manifestVersion", out _));
+
+        var authenticationErrorName = schemas.Single(name => name.EndsWith("AuthenticationErrorResponse", StringComparison.Ordinal));
+        foreach (var operation in new[]
+                 {
+                     paths.GetProperty("/api/auth/login").GetProperty("post"),
+                     paths.GetProperty("/api/auth/register").GetProperty("post"),
+                     paths.GetProperty("/api/auth/refresh").GetProperty("post"),
+                     paths.GetProperty("/api/auth/select-tenant").GetProperty("post")
+                 })
+        {
+            var errorResponses = operation.GetProperty("responses").EnumerateObject()
+                .Where(item => item.Name is "400" or "401" or "403" or "409" or "429")
+                .ToArray();
+            Assert.NotEmpty(errorResponses);
+            Assert.All(errorResponses, item => Assert.EndsWith($"/{authenticationErrorName}",
+                item.Value.GetProperty("content").GetProperty("application/json")
+                    .GetProperty("schema").GetProperty("$ref").GetString()));
+        }
     }
 
     [Fact]
@@ -134,7 +181,7 @@ public sealed class OpenApiContractTests
                 .Select(operation => (Path: path.Name, Method: operation.Name, Contract: operation.Value)))
             .ToArray();
 
-        Assert.Equal(34, operations.Length);
+        Assert.Equal(37, operations.Length);
         foreach (var operation in operations)
         {
             Assert.StartsWith("Access_", operation.Contract.GetProperty("operationId").GetString());
@@ -146,6 +193,15 @@ public sealed class OpenApiContractTests
 
         var register = operations.Single(operation => operation.Path == "/api/auth/register").Contract;
         Assert.Empty(register.GetProperty("security").EnumerateArray());
+
+        var canonicalSelection = operations.Single(operation => operation.Path == "/api/auth/select-tenant").Contract;
+        Assert.False(canonicalSelection.TryGetProperty("deprecated", out var canonicalDeprecated) && canonicalDeprecated.GetBoolean());
+        foreach (var aliasPath in new[] { "/api/tenants/select", "/api/tenants/switch" })
+        {
+            var alias = operations.Single(operation => operation.Path == aliasPath).Contract;
+            Assert.True(alias.GetProperty("deprecated").GetBoolean());
+            Assert.Contains("/api/auth/select-tenant", alias.GetProperty("description").GetString());
+        }
 
         var assignRole = operations.Single(operation =>
             operation.Path == "/api/account/access/users/{userId}/roles/{roleId}" && operation.Method == "put").Contract;
@@ -264,8 +320,8 @@ public sealed class OpenApiContractTests
                 .Select(operation => (Path: path.Name, Method: operation.Name, Contract: operation.Value)))
             .ToArray();
 
-        Assert.Equal(19, operations.Length);
-        Assert.Equal(19, operations.Select(operation => operation.Contract.GetProperty("operationId").GetString()).Distinct().Count());
+        Assert.Equal(20, operations.Length);
+        Assert.Equal(20, operations.Select(operation => operation.Contract.GetProperty("operationId").GetString()).Distinct().Count());
         foreach (var operation in operations)
         {
             Assert.StartsWith("Scheduling_", operation.Contract.GetProperty("operationId").GetString());
@@ -295,14 +351,62 @@ public sealed class OpenApiContractTests
             operation.Path == "/api/scheduling/appointments" && operation.Method == "get").Contract;
         Assert.Contains("scheduling.read", appointments.GetProperty("description").GetString());
 
+        var capacity = operations.Single(operation =>
+            operation.Path == "/api/scheduling/professionals/{professionalId}/capacity" && operation.Method == "get").Contract;
+        Assert.Contains("scheduling.read", capacity.GetProperty("description").GetString());
+        Assert.Contains("bucket inteiro", capacity.GetProperty("description").GetString());
+        var capacitySchema = document.RootElement.GetProperty("components").GetProperty("schemas")
+            .EnumerateObject().Single(schema => schema.Name.EndsWith("EffectiveProfessionalCapacityResponse", StringComparison.Ordinal)).Value;
+        var capacityProperties = capacitySchema.GetProperty("properties");
+        Assert.True(capacityProperties.TryGetProperty("effectiveCapacity", out _));
+        Assert.True(capacityProperties.TryGetProperty("defaultCapacity", out _));
+        Assert.True(capacityProperties.TryGetProperty("source", out _));
+        Assert.True(capacityProperties.TryGetProperty("gridIntervalMinutes", out _));
+        Assert.True(capacityProperties.TryGetProperty("partialOccupancyConsumesWholeBucket", out _));
+
+        var slotSchemas = document.RootElement.GetProperty("components").GetProperty("schemas")
+            .EnumerateObject().Where(schema => schema.Name.EndsWith("AvailabilitySlotResponse", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, slotSchemas.Length);
+        Assert.All(slotSchemas, schema =>
+        {
+            var properties = schema.Value.GetProperty("properties");
+            Assert.True(properties.TryGetProperty("startsAtUtc", out _));
+            Assert.True(properties.TryGetProperty("endsAtUtc", out _));
+            Assert.True(properties.TryGetProperty("utcOffset", out _));
+            Assert.True(properties.TryGetProperty("isAmbiguousLocalTime", out _));
+        });
+
         var create = operations.Single(operation =>
             operation.Path == "/api/scheduling/appointments" && operation.Method == "post").Contract;
         Assert.Contains("entitlement", create.GetProperty("description").GetString());
-        Assert.True(create.GetProperty("responses").TryGetProperty("409", out _));
+        var createConflict = create.GetProperty("responses").GetProperty("409")
+            .GetProperty("content").GetProperty("application/problem+json").GetProperty("schema");
+        var conflictDiscriminator = createConflict.GetProperty("discriminator");
+        Assert.Equal("code", conflictDiscriminator.GetProperty("propertyName").GetString());
+        Assert.Equal(5, conflictDiscriminator.GetProperty("mapping").EnumerateObject().Count());
+        Assert.Equal(5, createConflict.GetProperty("oneOf").GetArrayLength());
 
         var reschedule = operations.Single(operation =>
             operation.Path == "/api/scheduling/appointments/{appointmentId}/reschedule" && operation.Method == "put").Contract;
         Assert.Contains("ExpectedVersion", reschedule.GetProperty("description").GetString());
+        var stale = reschedule.GetProperty("responses").GetProperty("412")
+            .GetProperty("content").GetProperty("application/problem+json").GetProperty("schema");
+        Assert.Equal("code", stale.GetProperty("discriminator").GetProperty("propertyName").GetString());
+        Assert.Single(stale.GetProperty("oneOf").EnumerateArray());
+
+        var problemSchemas = document.RootElement.GetProperty("components").GetProperty("schemas")
+            .EnumerateObject().Where(schema => schema.Name.Contains("SchedulingProblemContract", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(6, problemSchemas.Length);
+        Assert.All(problemSchemas, schema =>
+        {
+            var properties = schema.Value.GetProperty("properties");
+            Assert.True(properties.TryGetProperty("type", out _));
+            Assert.True(properties.TryGetProperty("title", out _));
+            Assert.True(properties.TryGetProperty("status", out _));
+            Assert.True(properties.TryGetProperty("code", out _));
+            Assert.True(properties.TryGetProperty("detail", out _));
+            Assert.True(properties.TryGetProperty("details", out _));
+        });
 
         var publicCreate = operations.Single(operation =>
             operation.Path == "/api/public/scheduling/{tenantId}/appointments" && operation.Method == "post").Contract;
@@ -327,8 +431,8 @@ public sealed class OpenApiContractTests
                 .Select(operation => (Path: path.Name, Method: operation.Name, Contract: operation.Value)))
             .ToArray();
 
-        Assert.Equal(24, operations.Length);
-        Assert.Equal(24, operations.Select(operation => operation.Contract.GetProperty("operationId").GetString()).Distinct().Count());
+        Assert.Equal(25, operations.Length);
+        Assert.Equal(25, operations.Select(operation => operation.Contract.GetProperty("operationId").GetString()).Distinct().Count());
         foreach (var operation in operations)
         {
             Assert.StartsWith("Auxiliary_", operation.Contract.GetProperty("operationId").GetString());
@@ -365,6 +469,8 @@ public sealed class OpenApiContractTests
             builder.UseSetting("Jwt:Audience", "Shine.Api");
             builder.UseSetting("RabbitMq:Enabled", "false");
             builder.UseSetting("Cors:AllowedOrigins:0", "https://openapi-tests.shine.example");
+            builder.UseSetting("WebSession:PublicApiOrigin", "https://api.shine.example");
+            builder.UseSetting("WebSession:SiteDomain", "shine.example");
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureServices(services => services.RemoveAll<IHostedService>());
         }

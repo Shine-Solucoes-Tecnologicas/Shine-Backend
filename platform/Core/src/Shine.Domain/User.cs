@@ -4,12 +4,13 @@ public sealed class User
 {
     private User() { }
 
-    public User(string email, string passwordHash)
+    public User(string email, string passwordHash, bool emailVerified = true)
     {
         Id = Guid.NewGuid();
         Email = email.Trim();
         NormalizedEmail = NormalizeEmail(email);
         PasswordHash = passwordHash;
+        EmailVerifiedAtUtc = emailVerified ? DateTime.UtcNow : null;
         IsActive = true;
         CreatedAtUtc = DateTime.UtcNow;
     }
@@ -18,6 +19,8 @@ public sealed class User
     public string Email { get; private set; } = null!;
     public string NormalizedEmail { get; private set; } = null!;
     public string PasswordHash { get; private set; } = null!;
+    public DateTime? EmailVerifiedAtUtc { get; private set; }
+    public bool IsEmailVerified => EmailVerifiedAtUtc.HasValue;
     public bool IsActive { get; private set; }
     public int FailedLoginAttempts { get; private set; }
     public DateTime? LockedUntilUtc { get; private set; }
@@ -30,6 +33,15 @@ public sealed class User
     public static string NormalizeEmail(string email) => email.Trim().ToUpperInvariant();
 
     public void ChangePassword(string passwordHash) => PasswordHash = passwordHash;
+    public void VerifyEmail(DateTime nowUtc) => EmailVerifiedAtUtc ??= nowUtc;
+    public void ChangeEmail(string email)
+    {
+        var normalized = NormalizeEmail(email);
+        if (normalized == NormalizedEmail) return;
+        Email = email.Trim();
+        NormalizedEmail = normalized;
+        EmailVerifiedAtUtc = null;
+    }
     public void Block(string reason, Guid administratorUserId, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("A block reason is required.", nameof(reason));

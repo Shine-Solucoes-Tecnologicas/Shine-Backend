@@ -239,6 +239,16 @@ public sealed class AuthorizationPipelineTests(DatabaseFixture fixture)
         }
         Assert.Equal(HttpStatusCode.NotFound,
             (await client.GetAsync($"/api/scheduling/professionals/{otherProfessional.Id}/availability")).StatusCode);
+        var ownCapacity = await client.GetAsync($"/api/scheduling/professionals/{ownProfessional.Id}/capacity");
+        Assert.Equal(HttpStatusCode.OK, ownCapacity.StatusCode);
+        using (var json = JsonDocument.Parse(await ownCapacity.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal(ownProfessional.Id, json.RootElement.GetProperty("professionalId").GetGuid());
+            Assert.Equal("default", json.RootElement.GetProperty("source").GetString());
+            Assert.True(json.RootElement.GetProperty("partialOccupancyConsumesWholeBucket").GetBoolean());
+        }
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.GetAsync($"/api/scheduling/professionals/{otherProfessional.Id}/capacity")).StatusCode);
         var ownBlock = new { startsAtUtc = fromUtc.AddHours(3), endsAtUtc = fromUtc.AddHours(4), reason = "Own block" };
         Assert.Equal(HttpStatusCode.OK,
             (await client.PostAsJsonAsync($"/api/scheduling/professionals/{ownProfessional.Id}/blocks", ownBlock)).StatusCode);
@@ -302,7 +312,7 @@ public sealed class AuthorizationPipelineTests(DatabaseFixture fixture)
             AccessTokenMinutes = 5
         });
         var service = new JwtAccessTokenService(options, new JwtSigningKeyRing(options));
-        return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, Array.Empty<string>()).Token);
+        return new AuthenticationHeaderValue("Bearer", service.Create(userId, Guid.NewGuid(), tenantId, userTenantId, Array.Empty<string>()).Token);
     }
 
     private string ConnectionString() => fixture.ConnectionString;

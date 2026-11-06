@@ -22,16 +22,18 @@ public sealed class JwtTokenSecurityTests
         var ring = new JwtSigningKeyRing(options);
         var service = new JwtAccessTokenService(options, ring);
         var userId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();
         var userTenantId = Guid.NewGuid();
 
-        var result = service.Create(userId, tenantId, userTenantId, ["editor", "financial"]);
+        var result = service.Create(userId, sessionId, tenantId, userTenantId, ["editor", "financial"]);
         var token = new JwtSecurityTokenHandler().ReadJwtToken(result.Token);
 
         Assert.Equal("current", token.Header.Kid);
         Assert.Equal(SecurityAlgorithms.HmacSha256, token.Header.Alg);
         Assert.Equal(userId.ToString(), token.Subject);
         Assert.Contains(token.Claims, claim => claim.Type == "user_id" && claim.Value == userId.ToString());
+        Assert.Contains(token.Claims, claim => claim.Type == "sid" && claim.Value == sessionId.ToString());
         Assert.Contains(token.Claims, claim => claim.Type == "tenant_id" && claim.Value == tenantId.ToString());
         Assert.Contains(token.Claims, claim => claim.Type == "user_tenant_id" && claim.Value == userTenantId.ToString());
         Assert.True((await Validate(result.Token, settings, ring)).IsValid);
@@ -61,7 +63,7 @@ public sealed class JwtTokenSecurityTests
         var rotatingRing = new JwtSigningKeyRing(rotatingOptions);
         var oldToken = Token(rotating.Issuer, rotating.Audience, "old", OldSecret, SecurityAlgorithms.HmacSha256, DateTime.UtcNow.AddMinutes(5));
         var newToken = new JwtAccessTokenService(rotatingOptions, rotatingRing)
-            .Create(Guid.NewGuid(), null, null, []).Token;
+            .Create(Guid.NewGuid(), Guid.NewGuid(), null, null, []).Token;
 
         Assert.True((await Validate(oldToken, rotating, rotatingRing)).IsValid);
         Assert.Equal("new", new JwtSecurityTokenHandler().ReadJwtToken(newToken).Header.Kid);

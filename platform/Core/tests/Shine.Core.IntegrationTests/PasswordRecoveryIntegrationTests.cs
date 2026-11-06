@@ -4,6 +4,7 @@ using Shine.Infrastructure;
 using Shine.Api;
 using Shine.Api.Controllers;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Shine.IntegrationTests;
 
@@ -66,7 +67,12 @@ public sealed class PasswordRecoveryIntegrationTests(DatabaseFixture fixture)
         var delivery = new CapturingDelivery();
         var logger = new CapturingLogger<PasswordRecoveryController>();
         var controller = new PasswordRecoveryController(db, new TestPasswordHash(), new TestPasswordPolicy(),
-            template, delivery, logger);
+            template, delivery, logger, new AuthenticationSecurityEventEmitter(db,
+                new AuthenticationSecurityEventBuilder(Options.Create(new SecurityFingerprintOptions
+                {
+                    ActiveKeyVersion = "test",
+                    Keys = [new SecurityFingerprintKeyOptions { Version = "test", Secret = "integration-security-fingerprint-key-32-bytes" }]
+                }))), new LegacyTestWebSessionTransport());
 
         await controller.RequestRecovery(new PasswordRecoveryRequest(user.Email), default);
 

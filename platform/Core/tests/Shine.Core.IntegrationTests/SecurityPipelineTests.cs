@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,10 +25,12 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
     private const string JwtSecret = "integration-tests-only-secret-with-at-least-32-bytes";
     private const string ProductionConnectionString = "Host=database.internal;Port=5432;Database=shine;Username=shine_app;Password=production-test-password-with-32-bytes";
     private const string ProductionJwtSecret = "production-test-jwt-secret-with-at-least-32-bytes";
+    private const string ProductionSecurityFingerprintSecret = "Q8vZ2nR7xP4mK9sT6wY3cF1hJ5dL0aB8eN2uG7iC4oM9";
 
     [Fact]
     public async Task Login_rate_limit_has_stable_contract_ignores_untrusted_forwarding_and_recovers()
     {
+        var startedAtUtc = DateTime.UtcNow;
         await using var factory = new ApiFactory(ConnectionString(), new Dictionary<string, string?>
         {
             ["AuthenticationRateLimiting:Login:PermitLimit"] = "1",
@@ -54,10 +57,40 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
         Assert.True(int.Parse(Assert.Single(retryValues)) >= 1);
         using var payload = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync());
         Assert.Equal("rate_limit_exceeded", payload.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
+        for (var attempt = 0; attempt < 3; attempt++)
+            Assert.Equal(HttpStatusCode.TooManyRequests,
+                (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("", ""))).StatusCode);
+        await using (var verification = fixture.CreateDb())
+        {
+            var evidence = await verification.OperationalLogs.AsNoTracking()
+                .Where(x => x.CreatedAtUtc >= startedAtUtc &&
+                    x.Message.Contains(AuthenticationSecurityEventNames.SuspiciousActivityDetected) &&
+                    x.Message.Contains(AuthenticationSecurityReasons.RateLimited))
+                .Select(x => x.Message)
+                .ToArrayAsync();
+            Assert.Single(evidence);
+            Assert.DoesNotContain("198.51.100.10", evidence[0], StringComparison.Ordinal);
+            Assert.DoesNotContain("203.0.113.20", evidence[0], StringComparison.Ordinal);
+            var suspiciousAudits = (await verification.AuditEntries.AsNoTracking()
+                    .Where(x => x.OccurredAtUtc >= startedAtUtc && x.EntityType == "AuthenticationSecurityEvent")
+                    .Select(x => x.NewValuesJson)
+                    .ToArrayAsync())
+                .Where(x => x is not null && x.Contains(AuthenticationSecurityEventNames.SuspiciousActivityDetected))
+                .ToArray();
+            Assert.Single(suspiciousAudits);
+        }
 
         await Task.Delay(TimeSpan.FromMilliseconds(1_100));
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("", ""))).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests,
+            (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("", ""))).StatusCode);
+        await using var afterWindow = fixture.CreateDb();
+        var evidenceAfterWindow = await afterWindow.OperationalLogs.AsNoTracking()
+            .CountAsync(x => x.CreatedAtUtc >= startedAtUtc &&
+                x.Message.Contains(AuthenticationSecurityEventNames.SuspiciousActivityDetected) &&
+                x.Message.Contains(AuthenticationSecurityReasons.RateLimited));
+        Assert.Equal(2, evidenceAfterWindow);
     }
 
     [Fact]
@@ -197,7 +230,7 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
         var requests = new (string Path, object Body, HttpStatusCode FirstStatus)[]
         {
             ("/api/auth/login", new LoginRequest("", ""), HttpStatusCode.Unauthorized),
-            ("/api/auth/register", new RegistrationRequest("", "", ""), HttpStatusCode.BadRequest),
+            ("/api/auth/register", new RegistrationRequest("", "", "", ""), HttpStatusCode.BadRequest),
             ("/api/auth/refresh", new RefreshRequest("invalid"), HttpStatusCode.Unauthorized),
             ("/api/auth/password/recovery", new PasswordRecoveryRequest(""), HttpStatusCode.Accepted)
         };
@@ -236,8 +269,9 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
             .Select(async response => JsonDocument.Parse(await response.Content.ReadAsStringAsync())));
         Assert.All(publicBodies, body =>
         {
-            Assert.Equal(401, body.RootElement.GetProperty("status").GetInt32());
-            Assert.Equal("Unauthorized", body.RootElement.GetProperty("title").GetString());
+            var error = Assert.Single(body.RootElement.GetProperty("errors").EnumerateArray());
+            Assert.Equal(AuthenticationErrors.InvalidCredentials, error.GetProperty("code").GetString());
+            Assert.False(error.TryGetProperty("field", out _));
         });
 
         Assert.Equal(3, verifier.EncodedHashes.Count);
@@ -258,6 +292,7 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
         var allowed = await Preflight(client, "https://frontend.example.test");
         Assert.Equal(HttpStatusCode.NoContent, allowed.StatusCode);
         Assert.Equal("https://frontend.example.test", allowed.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.Equal("true", allowed.Headers.GetValues("Access-Control-Allow-Credentials").Single());
 
         var blocked = await Preflight(client, "https://attacker.example.test");
         Assert.Equal(HttpStatusCode.NoContent, blocked.StatusCode);
@@ -294,6 +329,55 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task Login_flows_persist_redacted_operational_events_and_audit_only_success()
+    {
+        const string password = "Strong-password-123!";
+        var rawEmail = $"security-evidence-{Guid.NewGuid():N}@example.test";
+        var user = new User(rawEmail, new Pbkdf2PasswordHashService().Hash(password));
+        var tenant = new Tenant($"Security evidence {Guid.NewGuid():N}");
+        var membership = new UserTenant(user.Id, tenant.Id, user.Id, isOwner: true);
+        await using (var db = fixture.CreateDb())
+        {
+            db.AddRange(user, tenant, membership);
+            await db.SaveChangesAsync();
+        }
+
+        await using var factory = new ApiFactory(ConnectionString());
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SensitiveBrowser/987 secret-marker");
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest(rawEmail, "wrong-secret-marker"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.PostAsJsonAsync("/api/auth/login", new LoginRequest(rawEmail, password))).StatusCode);
+
+        await using var verification = fixture.CreateDb();
+        var operational = await verification.OperationalLogs.AsNoTracking()
+            .Where(x => x.Message.Contains(user.Id.ToString()) && x.Message.Contains(AuthenticationSecurityEventNames.Login))
+            .Select(x => x.Message)
+            .ToArrayAsync();
+        Assert.Equal(2, operational.Length);
+        Assert.Single(operational, x => x.Contains($"\"outcome\":\"{AuthenticationSecurityOutcomes.Succeeded}\""));
+        Assert.Single(operational, x => x.Contains($"\"outcome\":\"{AuthenticationSecurityOutcomes.Denied}\""));
+        Assert.DoesNotContain(operational, x => x.Contains(rawEmail, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(operational, x => x.Contains("wrong-secret-marker", StringComparison.Ordinal));
+        Assert.DoesNotContain(operational, x => x.Contains("SensitiveBrowser/987", StringComparison.Ordinal));
+
+        var audits = (await verification.AuditEntries.AsNoTracking()
+                .Where(x => x.EntityType == "AuthenticationSecurityEvent")
+                .Select(x => x.NewValuesJson)
+                .ToArrayAsync())
+            .Where(x => x is not null && x.Contains(user.Id.ToString()) &&
+                x.Contains(AuthenticationSecurityEventNames.Login))
+            .Cast<string>()
+            .ToArray();
+        Assert.Single(audits);
+        using var auditDocument = JsonDocument.Parse(audits[0]);
+        Assert.Equal(AuthenticationSecurityOutcomes.Succeeded,
+            auditDocument.RootElement.GetProperty("outcome").GetString());
+        Assert.DoesNotContain(rawEmail, audits[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Production_fails_startup_without_an_explicit_cors_origin()
     {
         using var factory = new ApiFactory(ConnectionString(), environment: Environments.Production);
@@ -310,6 +394,17 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
         }, environment: Environments.Production);
         var error = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
         Assert.Contains("Cors:AllowedOrigins", error.ToString());
+    }
+
+    [Fact]
+    public void Production_rejects_cross_site_web_session_topology()
+    {
+        using var factory = new ApiFactory(ConnectionString(), new Dictionary<string, string?>
+        {
+            ["Cors:AllowedOrigins:0"] = "https://frontend.other.test"
+        }, environment: Environments.Production);
+        var error = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+        Assert.Contains("same-site", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -396,12 +491,13 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
             CancellationToken cancellationToken) => stream.Write(bytes);
     }
 
-    private sealed class ApiFactory(
+    internal sealed class ApiFactory(
         string connectionString,
         IReadOnlyDictionary<string, string?>? settings = null,
         IPasswordHashService? passwordHashService = null,
         string environment = "Development",
-        IPAddress? remoteIpAddress = null) : WebApplicationFactory<Program>
+        IPAddress? remoteIpAddress = null,
+        IAuthenticationSecurityEventEmitter? securityEventEmitter = null) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -412,10 +508,17 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
                 builder.UseSetting("Jwt:ActiveKeyId", "production-test");
                 builder.UseSetting("Jwt:SigningKeys:0:Id", "production-test");
                 builder.UseSetting("Jwt:SigningKeys:0:Secret", ProductionJwtSecret);
+                builder.UseSetting("SecurityEvents:Fingerprinting:ActiveKeyVersion", "production-test");
+                builder.UseSetting("SecurityEvents:Fingerprinting:Keys:0:Version", "production-test");
+                builder.UseSetting("SecurityEvents:Fingerprinting:Keys:0:Secret", ProductionSecurityFingerprintSecret);
+                builder.UseSetting("WebSession:PublicApiOrigin", "https://api.example.test");
+                builder.UseSetting("WebSession:SiteDomain", "example.test");
             }
             else
             {
                 builder.UseSetting("Jwt:Secret", JwtSecret);
+                if (environment == Environments.Development)
+                    builder.UseSetting("WebSession:AllowLegacyBodyTransport", "true");
             }
             builder.UseSetting("Jwt:Issuer", "Shine");
             builder.UseSetting("Jwt:Audience", "Shine.Api");
@@ -426,6 +529,7 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureServices(services =>
             {
+                services.AddDataProtection().UseEphemeralDataProtectionProvider();
                 services.RemoveAll<IHostedService>();
                 if (remoteIpAddress is not null)
                     services.AddSingleton<IStartupFilter>(new RemoteIpStartupFilter(remoteIpAddress));
@@ -433,6 +537,11 @@ public sealed class SecurityPipelineTests(DatabaseFixture fixture)
                 {
                     services.RemoveAll<IPasswordHashService>();
                     services.AddSingleton(passwordHashService);
+                }
+                if (securityEventEmitter is not null)
+                {
+                    services.RemoveAll<IAuthenticationSecurityEventEmitter>();
+                    services.AddSingleton(securityEventEmitter);
                 }
             });
         }

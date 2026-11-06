@@ -3,9 +3,9 @@ namespace Shine.Domain;
 /// <summary>Stable identity and presentation metadata for a dashboard widget published by a module.</summary>
 public sealed class DashboardWidgetDescriptor
 {
-    public DashboardWidgetDescriptor(string widgetKey, string moduleKey, string title, string description, string requiredPermission, int defaultWidth = 2, int defaultHeight = 1, int minWidth = 1, int minHeight = 1, string settingsSchemaVersion = "1", string dataSource = "internal")
+    public DashboardWidgetDescriptor(string widgetKey, string moduleKey, string title, string description, string requiredPermission, int defaultWidth = 2, int defaultHeight = 1, int minWidth = 1, int minHeight = 1, string settingsSchemaVersion = "1", string dataSource = "internal", int defaultOrder = 100)
     {
-        WidgetKey = NormalizeWidgetKey(widgetKey, nameof(widgetKey)); ModuleKey = Normalize(moduleKey, nameof(moduleKey)); Title = Require(title, nameof(title)); Description = Require(description, nameof(description)); RequiredPermission = Require(requiredPermission, nameof(requiredPermission)); DefaultWidth = defaultWidth; DefaultHeight = defaultHeight; MinWidth = minWidth; MinHeight = minHeight; SettingsSchemaVersion = Require(settingsSchemaVersion, nameof(settingsSchemaVersion)); DataSource = Require(dataSource, nameof(dataSource)); Validate();
+        WidgetKey = NormalizeWidgetKey(widgetKey, nameof(widgetKey)); ModuleKey = Normalize(moduleKey, nameof(moduleKey)); Title = Require(title, nameof(title)); Description = Require(description, nameof(description)); RequiredPermission = Require(requiredPermission, nameof(requiredPermission)); DefaultWidth = defaultWidth; DefaultHeight = defaultHeight; MinWidth = minWidth; MinHeight = minHeight; SettingsSchemaVersion = Require(settingsSchemaVersion, nameof(settingsSchemaVersion)); DataSource = Require(dataSource, nameof(dataSource)); DefaultOrder = defaultOrder; Validate();
     }
     public string WidgetKey { get; }
     public string ModuleKey { get; }
@@ -18,6 +18,7 @@ public sealed class DashboardWidgetDescriptor
     public int MinHeight { get; }
     public string SettingsSchemaVersion { get; }
     public string DataSource { get; }
+    public int DefaultOrder { get; }
 
     public DashboardWidgetDescriptor Validate()
     {
@@ -25,6 +26,8 @@ public sealed class DashboardWidgetDescriptor
             throw new ArgumentException("Default widget size cannot be smaller than its minimum size.");
         if (MinWidth < 1 || MinHeight < 1)
             throw new ArgumentException("Widget minimum size must be positive.");
+        if (DefaultOrder < 0)
+            throw new ArgumentException("Default widget order cannot be negative.");
         return this;
     }
 

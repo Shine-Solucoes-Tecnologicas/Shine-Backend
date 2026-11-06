@@ -4,7 +4,7 @@ O Scheduling administra disponibilidade, exceções, bloqueios, slots e agendame
 
 ## Acesso e isolamento
 
-As 17 operações em `/api/scheduling` exigem token no contexto da unidade e acesso ao módulo `SCHEDULING`. As concessões usam escopo `own` ou `all`: `own` força o profissional vinculado ao usuário no servidor; `all` alcança todos os profissionais, mas somente na unidade autorizada. Um recurso fora desse alcance retorna `404` sem confirmar sua existência. Usuário com escopo `own` sem vínculo profissional ativo recebe `403 PROFESSIONAL_CONTEXT_REQUIRED`.
+As 18 operações em `/api/scheduling` exigem token no contexto da unidade e acesso ao módulo `SCHEDULING`. As concessões usam escopo `own` ou `all`: `own` força o profissional vinculado ao usuário no servidor; `all` alcança todos os profissionais, mas somente na unidade autorizada. Um recurso fora desse alcance retorna `404` sem confirmar sua existência. Usuário com escopo `own` sem vínculo profissional ativo recebe `403 PROFESSIONAL_CONTEXT_REQUIRED`.
 
 | Papel padrão | Concessões de Scheduling |
 | --- | --- |
@@ -27,6 +27,8 @@ As duas operações em `/api/public/scheduling/{tenantId}` são anônimas. Elas 
 - capacidade simultânea padrão, de 1 a 100.
 
 `PUT /professionals/{professionalId}/capacity` sobrescreve a capacidade padrão para um profissional. A capacidade é avaliada sob lock transacional por unidade e profissional para impedir que requisições concorrentes ultrapassem o limite.
+
+`GET /professionals/{professionalId}/capacity` retorna a capacidade efetiva, a capacidade padrão, a origem `default|override` e `gridIntervalMinutes`. `partialOccupancyConsumesWholeBucket=true` explicita que qualquer fração ocupada reserva o bucket inteiro; o frontend não recalcula ocupação.
 
 ## Duração do serviço
 
@@ -64,13 +66,17 @@ Regras, exceções e bloqueios do mesmo tipo não podem se sobrepor. Exceção s
 
 `GET /api/public/scheduling/{tenantId}/availability/slots` aplica o mesmo cálculo, aceita atributos para duração variável e inclui `durationMinutes` em cada slot.
 
+Cada slot também retorna `utcOffset` e `isAmbiguousLocalTime`. A grade é gerada no horário local da unidade e expandida para instantes UTC: horário inexistente não produz slot; horário repetido produz duas ocorrências distintas, ordenadas por UTC. A janela de consulta termina no início real do próximo dia local, portanto dias de transição podem ter 23 ou 25 horas. Duração e buffers representam tempo real decorrido.
+
+A capacidade usa buckets iniciados pela grade local. Qualquer fração ocupada pelo atendimento ou seus buffers consome o bucket inteiro. O cálculo é refeito a partir dos agendamentos ativos, usa a capacidade efetiva do profissional e não persiste contadores derivados.
+
 ## Agendamentos autenticados
 
 `GET /api/scheduling/appointments` lista, com paginação, os itens que intersectam `[fromUtc, toUtc)`. A ordenação é por início. A resposta inclui `Version`, usada no reagendamento otimista.
 
 `POST /api/scheduling/appointments` valida profissional e serviço ativos, vínculo entre ambos, cliente opcional da mesma unidade, duração, bloqueios, sobreposição, capacidade e entitlement. `AllowConflict` só confirma sobreposição quando a política é `WarnAndConfirm`; não ignora bloqueios nem capacidade máxima.
 
-`PUT /api/scheduling/appointments/{appointmentId}/reschedule` exige `ExpectedVersion`. Versão obsoleta retorna `409 STALE_APPOINTMENT` com a versão atual. Agendamentos `Cancelled`, `Completed` ou `NoShow` não podem ser reagendados.
+`PUT /api/scheduling/appointments/{appointmentId}/reschedule` exige `ExpectedVersion`. Versão obsoleta retorna `412 STALE_APPOINTMENT` com a versão e, quando seguro, o estado atual. Agendamentos `Cancelled`, `Completed` ou `NoShow` não podem ser reagendados.
 
 ## Estados e entitlement
 
@@ -95,7 +101,7 @@ Somente `Scheduled` e `Confirmed` consomem o entitlement `APPOINTMENTS.MAX`. Cri
 - slot ainda disponível no momento da gravação;
 - capacidade e entitlement disponíveis.
 
-A operação revalida disponibilidade dentro da transação e usa lock por profissional. Conflitos retornam `APPOINTMENT_UNAVAILABLE`, `CAPACITY_EXCEEDED`, `APPOINTMENT_CONFLICT` ou um dos códigos de entitlement.
+A operação revalida disponibilidade dentro da transação e usa lock por profissional. Conflitos retornam `SLOT_UNAVAILABLE`, `SCHEDULE_BLOCKED`, `CAPACITY_EXCEEDED`, `APPOINTMENT_CONFLICT` ou um dos códigos de entitlement.
 
 ## Rate limit e proxies
 
@@ -107,12 +113,19 @@ Em produção, `TrustedProxies` deve conter apenas proxies e redes conhecidos. `
 
 Criação, reagendamento e mudança de estado persistem eventos no outbox junto da operação. Esses eventos alimentam logs operacionais, invalidação/criação de lembretes e integrações assíncronas de forma idempotente. A resposta HTTP confirma a persistência local, não a entrega final de notificações externas.
 
+## Contrato de conflitos
+
+Conflitos do Scheduling usam `application/problem+json` com `type`, `title`, `status`, `code`, `detail` e `details`. Integrações decidem pelo `code`, nunca pelo texto. Os códigos `APPOINTMENT_CONFLICT`, `CAPACITY_EXCEEDED`, `SCHEDULE_BLOCKED`, `INVALID_APPOINTMENT_TRANSITION` e `SLOT_UNAVAILABLE` retornam `409`; `STALE_APPOINTMENT` retorna `412`.
+
+Intervalos usam ISO 8601 UTC. `CAPACITY_EXCEEDED` informa capacidade efetiva, pico resultante e buckets saturados mínimos e ordenados. Conflitos e bloqueios expõem somente intervalos: IDs, nomes, contatos, clientes, autoria e motivos internos não integram o payload. Somente `APPOINTMENT_CONFLICT` sob `WarnAndConfirm` pode indicar `confirmationRequired=true`.
+
 ## Erros principais
 
 - `400`: UTC, duração, atributos, período, capacidade ou configuração inválida.
 - `403`: módulo, permissão ou escopo local insuficiente; `PROFESSIONAL_CONTEXT_REQUIRED` indica ausência de vínculo profissional ativo no fluxo `own`.
 - `404`: recurso fora da unidade, cadastro inativo ou módulo público indisponível.
-- `409`: sobreposição, bloqueio, capacidade, confirmação ausente, entitlement ou versão concorrente.
+- `409`: sobreposição, bloqueio, capacidade, slot indisponível, transição inválida ou entitlement.
+- `412`: versão concorrente obsoleta (`STALE_APPOINTMENT`).
 - `429`: limite do endpoint público excedido.
 
 O contrato exato de parâmetros, schemas e enums está em `/openapi/v1.json`; `/docs` é habilitado somente em desenvolvimento.

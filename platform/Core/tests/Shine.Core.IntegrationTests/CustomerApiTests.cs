@@ -343,7 +343,7 @@ public sealed class CustomerApiTests(DatabaseFixture fixture)
             AccessTokenMinutes = 5
         });
         var service = new JwtAccessTokenService(options, new JwtSigningKeyRing(options));
-        return new AuthenticationHeaderValue("Bearer", service.Create(userId, tenantId, userTenantId, []).Token);
+        return new AuthenticationHeaderValue("Bearer", service.Create(userId, Guid.NewGuid(), tenantId, userTenantId, []).Token);
     }
 
     private string ConnectionString() => fixture.ConnectionString;

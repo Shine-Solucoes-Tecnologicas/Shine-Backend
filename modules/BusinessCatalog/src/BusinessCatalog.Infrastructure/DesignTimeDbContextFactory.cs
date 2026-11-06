@@ -8,7 +8,7 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Bus
     public BusinessCatalogDbContext CreateDbContext(string[] args)
     {
         var connection = Environment.GetEnvironmentVariable("ConnectionStrings__ShineDb")
-            ?? "Host=localhost;Port=5432;Database=shine;Username=shine;Password=shine";
+            ?? "Host=localhost;Port=5433;Database=shine;Username=shine;Password=shine";
         return new BusinessCatalogDbContext(new DbContextOptionsBuilder<BusinessCatalogDbContext>().UseNpgsql(connection).Options);
     }
 }

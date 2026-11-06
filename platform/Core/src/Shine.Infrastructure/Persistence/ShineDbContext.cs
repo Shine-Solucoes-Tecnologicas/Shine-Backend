@@ -18,6 +18,7 @@ public sealed class ShineDbContext(
 {
     private Guid? EffectiveTenantId => tenantExecutionContext?.EffectiveTenantId ?? currentTenant?.TenantId;
     public DbSet<User> Users => Set<User>();
+    public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<CustomerAccount> CustomerAccounts => Set<CustomerAccount>();
@@ -237,6 +238,15 @@ public sealed class ShineDbContext(
             entity.HasKey(token => token.Id);
             entity.Property(token => token.TokenHash).HasMaxLength(128).IsRequired();
             entity.HasIndex(token => token.TokenHash).IsUnique();
+            entity.HasOne(token => token.User).WithMany().HasForeignKey(token => token.UserId);
+        });
+
+        modelBuilder.Entity<EmailVerificationToken>(entity =>
+        {
+            entity.HasKey(token => token.Id);
+            entity.Property(token => token.TokenHash).HasMaxLength(128).IsRequired();
+            entity.HasIndex(token => token.TokenHash).IsUnique();
+            entity.HasIndex(token => new { token.UserId, token.UsedAtUtc });
             entity.HasOne(token => token.User).WithMany().HasForeignKey(token => token.UserId);
         });
 
@@ -466,7 +476,7 @@ public sealed class ShineDbContext(
         modelBuilder.Entity<TenantEntitlementOverride>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Key).HasMaxLength(120).IsRequired(); entity.Property(x => x.State).HasConversion<int>(); entity.Property(x => x.Version).HasDefaultValue(1); entity.Property(x => x.IsUnlimited).HasDefaultValue(false); entity.HasIndex(x => new { x.TenantId, x.Key }).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass || EffectiveTenantId != null && x.TenantId == EffectiveTenantId)); });
         modelBuilder.Entity<EntitlementUsage>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.Key).HasMaxLength(120).IsRequired(); entity.Property(x => x.Version).IsConcurrencyToken(); entity.HasIndex(x => new { x.TenantId, x.Key }).IsUnique(); entity.HasQueryFilter(x => !x.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass || EffectiveTenantId != null && x.TenantId == EffectiveTenantId)); });
         modelBuilder.Entity<EntitlementReservation>(entity => { entity.HasKey(x => new { x.TenantId, x.Key, x.OperationId }); entity.Property(x => x.Key).HasMaxLength(120).IsRequired(); entity.Property(x => x.Status).HasConversion<int>(); entity.HasIndex(x => new { x.TenantId, x.Key, x.Status }); entity.HasQueryFilter(x => !x.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass || EffectiveTenantId != null && x.TenantId == EffectiveTenantId)); });
-        modelBuilder.Entity<DashboardLayout>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.DashboardKey).HasMaxLength(120).IsRequired(); entity.HasIndex(x => new { x.TenantId, x.UserId, x.DashboardKey }).IsUnique(); entity.HasMany(x => x.Placements).WithOne().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.Cascade); entity.HasQueryFilter(x => !x.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass || EffectiveTenantId != null && x.TenantId == EffectiveTenantId)); });
+        modelBuilder.Entity<DashboardLayout>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.DashboardKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.Version).IsConcurrencyToken(); entity.HasIndex(x => new { x.TenantId, x.UserId, x.DashboardKey }).IsUnique(); entity.HasMany(x => x.Placements).WithOne().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.Cascade); entity.HasQueryFilter(x => !x.IsDeleted && (tenantExecutionContext != null && tenantExecutionContext.IsBypass || EffectiveTenantId != null && x.TenantId == EffectiveTenantId)); });
         modelBuilder.Entity<DashboardWidgetPlacement>(entity => { entity.HasKey(x => x.Id); entity.Property(x => x.WidgetKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.ModuleKey).HasMaxLength(120).IsRequired(); entity.Property(x => x.SettingsJson).HasMaxLength(16000).IsRequired(); entity.HasIndex(x => new { x.LayoutId, x.WidgetKey }).IsUnique(); });
         modelBuilder.Entity<StoredFileMetadata>(entity =>
         {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Scheduling.Application;
 using Scheduling.Domain;
@@ -16,12 +17,15 @@ public sealed class PublicSchedulingCapacityTests(DatabaseFixture fixture)
     {
         Assert.IsType<OkObjectResult>((await BookAsync(ConflictMode.Allow, allowConflict: false)).Result);
 
-        var warning = Assert.IsType<ConflictObjectResult>((await BookAsync(ConflictMode.WarnAndConfirm, allowConflict: false)).Result);
+        var warning = Assert.IsType<ObjectResult>((await BookAsync(ConflictMode.WarnAndConfirm, allowConflict: false)).Result);
+        Assert.Equal(StatusCodes.Status409Conflict, warning.StatusCode);
+        Assert.Contains("application/problem+json", warning.ContentTypes);
         Assert.Contains("APPOINTMENT_CONFLICT", JsonSerializer.Serialize(warning.Value));
         Assert.IsType<OkObjectResult>((await BookAsync(ConflictMode.WarnAndConfirm, allowConflict: true)).Result);
 
-        var blocked = Assert.IsType<ConflictObjectResult>((await BookAsync(ConflictMode.Block, allowConflict: true)).Result);
-        Assert.Contains("APPOINTMENT_UNAVAILABLE", JsonSerializer.Serialize(blocked.Value));
+        var blocked = Assert.IsType<ObjectResult>((await BookAsync(ConflictMode.Block, allowConflict: true)).Result);
+        Assert.Equal(StatusCodes.Status409Conflict, blocked.StatusCode);
+        Assert.Contains("APPOINTMENT_CONFLICT", JsonSerializer.Serialize(blocked.Value));
     }
 
     private async Task<ActionResult<PublicAppointmentResponse>> BookAsync(ConflictMode mode, bool allowConflict)

@@ -13,6 +13,7 @@ public sealed class DashboardContractTests
         Assert.Equal("SCHEDULING", descriptor.ModuleKey);
         Assert.Equal("1", descriptor.SettingsSchemaVersion);
         Assert.Equal("internal", descriptor.DataSource);
+        Assert.Equal(100, descriptor.DefaultOrder);
     }
 
     [Fact]

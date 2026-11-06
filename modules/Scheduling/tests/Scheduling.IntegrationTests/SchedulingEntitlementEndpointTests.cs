@@ -1,8 +1,10 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Scheduling.Application;
 using Scheduling.Domain;
+using Scheduling.Infrastructure;
 using Shine.Api;
 using Shine.Api.Controllers;
 using Shine.Domain;
@@ -62,8 +64,8 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
 
         var results = await Task.WhenAll(CreateAsync(), CreateAsync());
         Assert.Single(results, x => x.Result is OkObjectResult);
-        var conflict = Assert.Single(results, x => x.Result is ConflictObjectResult);
-        Assert.Contains("CAPACITY_EXCEEDED", JsonSerializer.Serialize(Assert.IsType<ConflictObjectResult>(conflict.Result).Value));
+        var conflict = Assert.Single(results, x => x.Result is ObjectResult { StatusCode: StatusCodes.Status409Conflict });
+        Assert.Contains("CAPACITY_EXCEEDED", JsonSerializer.Serialize(Assert.IsType<ObjectResult>(conflict.Result).Value));
         await using var verification = fixture.CreateSchedulingDb();
         Assert.Equal(1, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(
             verification.Appointments.Where(x => x.TenantId == unitId && x.ProfessionalId == professional.Id)));
@@ -101,7 +103,7 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
 
         var results = await Task.WhenAll(RescheduleAsync(first.Id, first.Version), RescheduleAsync(second.Id, second.Version));
         Assert.Single(results, x => x.Result is OkObjectResult);
-        Assert.Single(results, x => x.Result is ConflictObjectResult);
+        Assert.Single(results, x => x.Result is ObjectResult { StatusCode: StatusCodes.Status409Conflict });
         await using var verification = fixture.CreateSchedulingDb();
         Assert.Equal(1, await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(
             verification.Appointments.Where(x => x.TenantId == unitId && x.ProfessionalId == professional.Id && x.StartsAtUtc == target)));
@@ -231,6 +233,134 @@ public sealed class SchedulingEntitlementEndpointTests(DatabaseFixture fixture)
         Assert.IsType<NotFoundResult>(result.Result);
         Assert.False(await schedulingDb.Appointments.AnyAsync(x => x.TenantId == unitId));
     }
+
+    [Fact]
+    public async Task Appointment_conflict_uses_problem_json_without_appointment_identity_or_customer_data()
+    {
+        var unitId = Guid.NewGuid();
+        var professional = new Professional(unitId, $"Conflict {Guid.NewGuid():N}");
+        var service = new Service(unitId, $"Conflict service {Guid.NewGuid():N}", 30);
+        var startsAtUtc = new DateTime(2026, 9, 10, 10, 0, 0, DateTimeKind.Utc);
+        var existing = new Appointment(unitId, professional.Id, service.Id, "Sensitive customer", "secret@example.test",
+            startsAtUtc, startsAtUtc.AddMinutes(30));
+        var settings = new SchedulingSettings(unitId);
+        settings.Update(15, 0, 0, "UTC", ConflictMode.WarnAndConfirm, 2);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb())
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
+        await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
+        db.AddRange(existing, settings);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, unitId);
+
+        var response = await controller.CreateAppointment(new CreateAppointmentRequest(
+            professional.Id, service.Id, "New customer", "new@example.test", startsAtUtc, startsAtUtc.AddMinutes(30)), default);
+
+        var result = Assert.IsType<ObjectResult>(response.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
+        Assert.Contains("application/problem+json", result.ContentTypes);
+        var problem = Assert.IsType<SchedulingProblemDetails>(result.Value);
+        Assert.Equal(SchedulingProblemCodes.AppointmentConflict, problem.Code);
+        var details = Assert.IsType<AppointmentConflictDetails>(problem.Details);
+        Assert.True(details.ConfirmationRequired);
+        Assert.Single(details.ConflictingIntervals);
+        var serialized = JsonSerializer.Serialize(problem);
+        Assert.DoesNotContain(existing.Id.ToString(), serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Sensitive customer", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret@example.test", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Capacity_problem_reports_minimal_ordered_saturated_buckets()
+    {
+        var unitId = Guid.NewGuid();
+        var professional = new Professional(unitId, $"Capacity {Guid.NewGuid():N}");
+        var service = new Service(unitId, $"Capacity service {Guid.NewGuid():N}", 30);
+        var startsAtUtc = new DateTime(2026, 9, 11, 10, 10, 0, DateTimeKind.Utc);
+        var settings = new SchedulingSettings(unitId);
+        settings.Update(15, 0, 0, "UTC", ConflictMode.Allow, 1);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb())
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
+        await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
+        db.AddRange(settings, new Appointment(unitId, professional.Id, service.Id, "Existing", "contact",
+            startsAtUtc.AddMinutes(-3), startsAtUtc.AddMinutes(10)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, unitId);
+
+        var response = await controller.CreateAppointment(new CreateAppointmentRequest(
+            professional.Id, service.Id, "New", "contact", startsAtUtc, startsAtUtc.AddMinutes(30)), default);
+
+        var problem = Assert.IsType<SchedulingProblemDetails>(Assert.IsType<ObjectResult>(response.Result).Value);
+        Assert.Equal(SchedulingProblemCodes.CapacityExceeded, problem.Code);
+        var details = Assert.IsType<CapacityExceededDetails>(problem.Details);
+        Assert.Equal(1, details.EffectiveCapacity);
+        Assert.Equal(2, details.ResultingPeakOccupancy);
+        Assert.Equal(2, details.SaturatedBuckets.Count);
+        Assert.True(details.SaturatedBuckets.SequenceEqual(details.SaturatedBuckets.OrderBy(x => x.StartUtc)));
+    }
+
+    [Fact]
+    public async Task Schedule_block_problem_exposes_intervals_but_not_internal_reason()
+    {
+        var unitId = Guid.NewGuid();
+        var professional = new Professional(unitId, $"Blocked {Guid.NewGuid():N}");
+        var service = new Service(unitId, $"Blocked service {Guid.NewGuid():N}", 30);
+        var startsAtUtc = new DateTime(2026, 9, 12, 10, 0, 0, DateTimeKind.Utc);
+        await using (var catalogDb = fixture.CreateBusinessCatalogDb())
+        {
+            catalogDb.AddRange(professional, service, new ProfessionalService(unitId, professional.Id, service.Id));
+            await catalogDb.SaveChangesAsync();
+        }
+        await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
+        db.Add(new ScheduleBlock(unitId, professional.Id, startsAtUtc, startsAtUtc.AddMinutes(30), "Internal reason"));
+        await db.SaveChangesAsync();
+
+        var response = await CreateController(db, unitId).CreateAppointment(new CreateAppointmentRequest(
+            professional.Id, service.Id, "Customer", "contact", startsAtUtc, startsAtUtc.AddMinutes(30)), default);
+
+        var problem = Assert.IsType<SchedulingProblemDetails>(Assert.IsType<ObjectResult>(response.Result).Value);
+        Assert.Equal(SchedulingProblemCodes.ScheduleBlocked, problem.Code);
+        Assert.Single(Assert.IsType<ScheduleBlockedDetails>(problem.Details).BlockedIntervals);
+        Assert.DoesNotContain("Internal reason", JsonSerializer.Serialize(problem), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Stale_version_and_invalid_transition_have_distinct_typed_contracts()
+    {
+        var unitId = Guid.NewGuid();
+        var appointment = new Appointment(unitId, Guid.NewGuid(), Guid.NewGuid(), "Customer", "contact",
+            DateTime.UtcNow.AddDays(4), DateTime.UtcNow.AddDays(4).AddMinutes(30));
+        await using var db = fixture.CreateSchedulingDb(new TestTenant(unitId));
+        db.Add(appointment);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, unitId);
+
+        var staleResponse = await controller.RescheduleAppointment(appointment.Id,
+            new RescheduleAppointmentRequest(appointment.StartsAtUtc.AddHours(1), appointment.EndsAtUtc.AddHours(1), Guid.NewGuid()), default);
+        var staleResult = Assert.IsType<ObjectResult>(staleResponse.Result);
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, staleResult.StatusCode);
+        var stale = Assert.IsType<SchedulingProblemDetails>(staleResult.Value);
+        Assert.Equal(SchedulingProblemCodes.StaleAppointment, stale.Code);
+        Assert.Equal(appointment.Version, Assert.IsType<StaleAppointmentDetails>(stale.Details).CurrentVersion);
+
+        var transitionResult = Assert.IsType<ObjectResult>(await controller.ChangeAppointmentStatus(
+            appointment.Id, new ChangeAppointmentStatusRequest(AppointmentStatus.Scheduled), default));
+        Assert.Equal(StatusCodes.Status409Conflict, transitionResult.StatusCode);
+        var transition = Assert.IsType<SchedulingProblemDetails>(transitionResult.Value);
+        Assert.Equal(SchedulingProblemCodes.InvalidAppointmentTransition, transition.Code);
+        Assert.Contains(AppointmentStatus.Confirmed,
+            Assert.IsType<InvalidAppointmentTransitionDetails>(transition.Details).AllowedTransitions);
+    }
+
+    private SchedulingController CreateController(SchedulingDbContext db, Guid unitId) =>
+        new(db, new TestTenant(unitId), new AvailabilitySlotCalculator(), new NoOpPublisher(), new NoOpLogWriter(),
+            new UnlimitedGuard(), new AllowAllSchedulingScopeAuthorization(),
+            businessCatalog: fixture.CreateBusinessCatalogReader(new TestTenant(unitId)));
 
     private sealed record TestTenant(Guid UnitId) : ICurrentTenant
     {

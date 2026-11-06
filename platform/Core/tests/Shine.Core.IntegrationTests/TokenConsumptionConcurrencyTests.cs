@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -32,13 +33,20 @@ public sealed class TokenConsumptionConcurrencyTests(DatabaseFixture fixture)
         var results = await Task.WhenAll(RotateAsync(), RotateAsync());
 
         var success = Assert.Single(results, x => x.Result is OkObjectResult);
-        Assert.Single(results, x => x.Result is UnauthorizedResult);
+        Assert.Single(results, x => x.Result is ObjectResult { StatusCode: 401 });
         var response = Assert.IsType<RefreshResponse>(Assert.IsType<OkObjectResult>(success.Result).Value);
         await using var verification = fixture.CreateDb();
         var stored = await verification.RefreshTokens.Where(x => x.UserId == user.Id).ToArrayAsync();
         Assert.Equal(2, stored.Length);
-        Assert.Single(stored, x => x.TokenHash == RefreshTokenHash.Hash(response.RefreshToken));
+        Assert.Single(stored, x => x.TokenHash == RefreshTokenHash.Hash(response.RefreshToken!));
         Assert.DoesNotContain(stored, x => x.TokenHash == response.RefreshToken);
+        var evidence = await verification.OperationalLogs.AsNoTracking()
+            .Where(x => x.Message.Contains(user.Id.ToString()) && x.Message.Contains(AuthenticationSecurityEventNames.SessionRefresh))
+            .Select(x => x.Message)
+            .ToArrayAsync();
+        Assert.Single(evidence, x => x.Contains($"\"outcome\":\"{AuthenticationSecurityOutcomes.Succeeded}\""));
+        Assert.DoesNotContain(evidence, x => x.Contains(source.Raw, StringComparison.Ordinal));
+        Assert.DoesNotContain(evidence, x => x.Contains(response.RefreshToken!, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -63,19 +71,42 @@ public sealed class TokenConsumptionConcurrencyTests(DatabaseFixture fixture)
         var results = await Task.WhenAll(ResetAsync(), ResetAsync());
 
         Assert.Single(results, x => x is NoContentResult);
-        Assert.Single(results, x => x is BadRequestResult);
+        Assert.Single(results, x => x is ObjectResult { StatusCode: 400 });
         await using var verification = fixture.CreateDb();
         Assert.NotNull((await verification.PasswordResetTokens.SingleAsync(x => x.UserId == user.Id)).UsedAtUtc);
         Assert.Equal("hashed:New-password-123!", (await verification.Users.SingleAsync(x => x.Id == user.Id)).PasswordHash);
+        var evidence = await verification.OperationalLogs.AsNoTracking()
+            .Where(x => x.Message.Contains(user.Id.ToString()) && x.Message.Contains(AuthenticationSecurityEventNames.PasswordResetCompleted))
+            .Select(x => x.Message)
+            .ToArrayAsync();
+        Assert.Single(evidence, x => x.Contains($"\"outcome\":\"{AuthenticationSecurityOutcomes.Succeeded}\""));
+        Assert.DoesNotContain(evidence, x => x.Contains(rawToken, StringComparison.Ordinal));
+        Assert.DoesNotContain(evidence, x => x.Contains("New-password-123!", StringComparison.Ordinal));
     }
 
-    private static AuthenticationController Authentication(Shine.Infrastructure.Persistence.ShineDbContext db) =>
-        new(db, new TestPasswordHash(), new TestPasswordPolicy(), new TestAccessTokens(),
-            Options.Create(new JwtOptions { RefreshTokenDays = 30 }), Options.Create(new LoginSecurityOptions()));
+    private static AuthenticationController Authentication(Shine.Infrastructure.Persistence.ShineDbContext db)
+    {
+        var accessTokens = new TestAccessTokens();
+        var jwt = Options.Create(new JwtOptions { RefreshTokenDays = 30 });
+        var events = SecurityEvents(db);
+        var tenantSelection = new TenantSessionSelectionService(
+            db, accessTokens, jwt, events, new HttpContextAccessor());
+        return new AuthenticationController(
+            db, new TestPasswordHash(), new TestPasswordPolicy(), accessTokens,
+            jwt, Options.Create(new LoginSecurityOptions()), events,
+            new LegacyTestWebSessionTransport(), tenantSelection);
+    }
 
     private static PasswordRecoveryController PasswordRecovery(Shine.Infrastructure.Persistence.ShineDbContext db) =>
         new(db, new TestPasswordHash(), new TestPasswordPolicy(), new TestTemplate(), new NullPasswordRecoveryDelivery(),
-            NullLogger<PasswordRecoveryController>.Instance);
+            NullLogger<PasswordRecoveryController>.Instance, SecurityEvents(db), new LegacyTestWebSessionTransport());
+
+    private static IAuthenticationSecurityEventEmitter SecurityEvents(Shine.Infrastructure.Persistence.ShineDbContext db) =>
+        new AuthenticationSecurityEventEmitter(db, new AuthenticationSecurityEventBuilder(Options.Create(new SecurityFingerprintOptions
+        {
+            ActiveKeyVersion = "test",
+            Keys = [new SecurityFingerprintKeyOptions { Version = "test", Secret = "integration-security-fingerprint-key-32-bytes" }]
+        })));
 
     private sealed class TestPasswordHash : IPasswordHashService
     {
@@ -94,7 +125,7 @@ public sealed class TokenConsumptionConcurrencyTests(DatabaseFixture fixture)
 
     private sealed class TestAccessTokens : IAccessTokenService
     {
-        public AccessTokenResult Create(Guid userId, Guid? tenantId, Guid? userTenantId, IEnumerable<string> roles) =>
+        public AccessTokenResult Create(Guid userId, Guid sessionId, Guid? tenantId, Guid? userTenantId, IEnumerable<string> roles) =>
             new("access-token", DateTime.UtcNow.AddMinutes(5));
     }
 

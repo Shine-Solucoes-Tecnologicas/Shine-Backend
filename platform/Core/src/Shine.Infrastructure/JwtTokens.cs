@@ -117,7 +117,7 @@ public sealed record AccessTokenResult(string Token, DateTime ExpiresAtUtc);
 
 public interface IAccessTokenService
 {
-    AccessTokenResult Create(Guid userId, Guid? tenantId, Guid? userTenantId, IEnumerable<string> roles);
+    AccessTokenResult Create(Guid userId, Guid sessionId, Guid? tenantId, Guid? userTenantId, IEnumerable<string> roles);
 }
 
 public sealed class JwtAccessTokenService(IOptions<JwtOptions> options, JwtSigningKeyRing keyRing) : IAccessTokenService
@@ -125,7 +125,7 @@ public sealed class JwtAccessTokenService(IOptions<JwtOptions> options, JwtSigni
     private readonly JwtOptions settings = options.Value;
     private readonly JwtSecurityTokenHandler handler = new();
 
-    public AccessTokenResult Create(Guid userId, Guid? tenantId, Guid? userTenantId, IEnumerable<string> roles)
+    public AccessTokenResult Create(Guid userId, Guid sessionId, Guid? tenantId, Guid? userTenantId, IEnumerable<string> roles)
     {
         var now = DateTimeOffset.UtcNow;
         var expires = now.AddMinutes(settings.AccessTokenMinutes);
@@ -133,6 +133,7 @@ public sealed class JwtAccessTokenService(IOptions<JwtOptions> options, JwtSigni
         {
             new(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new("user_id", userId.ToString()),
+            new(JwtRegisteredClaimNames.Sid, sessionId.ToString()),
             new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
         if (tenantId is Guid effectiveTenantId) claims.Add(new Claim("tenant_id", effectiveTenantId.ToString()));

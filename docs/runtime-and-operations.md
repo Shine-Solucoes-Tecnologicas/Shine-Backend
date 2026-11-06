@@ -21,6 +21,10 @@ Business Catalog assumiu o ownership das tabelas `Professionals`, `Services` e `
 
 A aplicação não chama `Database.Migrate` no startup. O deploy deve aplicar migrations como etapa explícita, na ordem abaixo:
 
+Para preparar um ambiente local vazio ou atualizar um ambiente já existente, prefira o comando reexecutável `./scripts/Local-Environment.ps1 -Action Prepare`. Ele valida o PostgreSQL, compila a solução e executa os mesmos comandos explícitos abaixo. Não remove volumes e não cria migrations.
+
+O workflow de CI executa esse mesmo comando sobre um volume efêmero vazio antes das suítes. Assim, migrations ausentes, ordem incorreta ou dependências implícitas do ambiente local interrompem o pipeline.
+
 ```powershell
 dotnet ef database update --project platform/Core/src/Shine.Infrastructure --startup-project host/Shine.Api --context ShineDbContext
 dotnet ef database update --project modules/Scheduling/src/Scheduling.Infrastructure --startup-project host/Shine.Api --context SchedulingDbContext

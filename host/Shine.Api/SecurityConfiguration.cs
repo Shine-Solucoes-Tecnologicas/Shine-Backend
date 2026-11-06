@@ -4,6 +4,10 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
+using Shine.Infrastructure;
+using Shine.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Antiforgery;
+using System.Collections.Concurrent;
 
 namespace Shine.Api;
 
@@ -13,6 +17,8 @@ public static class AuthenticationRateLimitPolicies
     public const string Registration = "auth-registration";
     public const string Refresh = "auth-refresh";
     public const string PasswordRecovery = "auth-password-recovery";
+    public const string EmailVerificationResend = "auth-email-verification-resend";
+    public const string EmailVerificationConfirm = "auth-email-verification-confirm";
 }
 
 public sealed class AuthenticationRateLimitingOptions
@@ -21,8 +27,11 @@ public sealed class AuthenticationRateLimitingOptions
     public EndpointRateLimitOptions Registration { get; init; } = new(5, TimeSpan.FromMinutes(5));
     public EndpointRateLimitOptions Refresh { get; init; } = new(30, TimeSpan.FromMinutes(1));
     public EndpointRateLimitOptions PasswordRecovery { get; init; } = new(5, TimeSpan.FromMinutes(15));
+    public EndpointRateLimitOptions EmailVerificationResend { get; init; } = new(5, TimeSpan.FromMinutes(15));
+    public EndpointRateLimitOptions EmailVerificationConfirm { get; init; } = new(10, TimeSpan.FromMinutes(5));
 
-    public bool IsValid() => Login.IsValid() && Registration.IsValid() && Refresh.IsValid() && PasswordRecovery.IsValid();
+    public bool IsValid() => Login.IsValid() && Registration.IsValid() && Refresh.IsValid() && PasswordRecovery.IsValid()
+        && EmailVerificationResend.IsValid() && EmailVerificationConfirm.IsValid();
 }
 
 public sealed record EndpointRateLimitOptions(int PermitLimit, TimeSpan Window)
@@ -56,6 +65,7 @@ public static class SecurityConfiguration
         IConfiguration configuration,
         IHostEnvironment environment)
     {
+        services.AddSingleton<IRateLimitEvidenceGate, RateLimitEvidenceGate>();
         services.AddOptions<AuthenticationRateLimitingOptions>()
             .Bind(configuration.GetSection("AuthenticationRateLimiting"))
             .Validate(options => options.IsValid(), "Authentication rate limits must have a positive permit limit and window.")
@@ -97,6 +107,8 @@ public static class SecurityConfiguration
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Registration, rateLimits.Registration);
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.Refresh, rateLimits.Refresh);
             AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.PasswordRecovery, rateLimits.PasswordRecovery);
+            AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.EmailVerificationResend, rateLimits.EmailVerificationResend);
+            AddFixedWindowPolicy(options, AuthenticationRateLimitPolicies.EmailVerificationConfirm, rateLimits.EmailVerificationConfirm);
             options.OnRejected = WriteRateLimitResponseAsync;
         });
 
@@ -107,6 +119,25 @@ public static class SecurityConfiguration
             .ValidateOnStart();
 
         var cors = configuration.GetSection("Cors").Get<ApiCorsOptions>() ?? new();
+        services.AddOptions<WebSessionOptions>()
+            .Bind(configuration.GetSection("WebSession"))
+            .Validate(options => ValidateWebSession(options, cors, environment),
+                "Production web sessions require HTTPS same-site origins: configure WebSession:PublicApiOrigin and WebSession:SiteDomain, and keep every CORS origin within that site.")
+            .ValidateOnStart();
+        services.AddAntiforgery(options =>
+        {
+            options.HeaderName = WebSessionTransport.AntiforgeryHeaderName;
+            options.Cookie.Name = environment.IsDevelopment() ? "Shine.Antiforgery" : "__Host-Shine.Antiforgery";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.Cookie.SecurePolicy = environment.IsDevelopment()
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always;
+            options.Cookie.Path = "/";
+            options.Cookie.IsEssential = true;
+        });
+        services.AddScoped<IWebSessionTransport, WebSessionTransport>();
+
         services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
         {
             if (cors.AllowedOrigins.Length > 0)
@@ -116,6 +147,20 @@ public static class SecurityConfiguration
         }));
 
         return services;
+    }
+
+    private static bool ValidateWebSession(WebSessionOptions options, ApiCorsOptions cors, IHostEnvironment environment)
+    {
+        if (environment.IsDevelopment()) return true;
+        if (options.AllowLegacyBodyTransport || string.IsNullOrWhiteSpace(options.SiteDomain) ||
+            !Uri.TryCreate(options.PublicApiOrigin, UriKind.Absolute, out var api) || api.Scheme != Uri.UriSchemeHttps)
+            return false;
+        var site = options.SiteDomain.Trim().TrimStart('.').ToLowerInvariant();
+        static bool InSite(string host, string siteDomain) =>
+            host.Equals(siteDomain, StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith($".{siteDomain}", StringComparison.OrdinalIgnoreCase);
+        return InSite(api.Host, site) && cors.AllowedOrigins.All(origin =>
+            Uri.TryCreate(origin, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && InSite(uri.Host, site));
     }
 
     private static void AddFixedWindowPolicy(RateLimiterOptions options, string policyName, EndpointRateLimitOptions limit) =>
@@ -150,6 +195,8 @@ public static class SecurityConfiguration
             AuthenticationRateLimitPolicies.Registration => limits.Registration,
             AuthenticationRateLimitPolicies.Refresh => limits.Refresh,
             AuthenticationRateLimitPolicies.PasswordRecovery => limits.PasswordRecovery,
+            AuthenticationRateLimitPolicies.EmailVerificationResend => limits.EmailVerificationResend,
+            AuthenticationRateLimitPolicies.EmailVerificationConfirm => limits.EmailVerificationConfirm,
             _ => null!
         };
         return limit is not null;
@@ -163,16 +210,40 @@ public static class SecurityConfiguration
         var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var delay)
             ? delay
             : TimeSpan.FromSeconds(1);
+        try
+        {
+            var http = context.HttpContext;
+            var identity = AuthenticationRateLimitIdentityMiddleware.GetPartitionIdentity(http);
+            var policy = http.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName ?? "authentication";
+            var partition = identity == "anonymous" ? $"ip:{ClientAddress(http)}" : $"identity:{identity}";
+            if (http.RequestServices.GetRequiredService<IRateLimitEvidenceGate>()
+                .TryAcquire($"{policy}:{partition}", DateTime.UtcNow, retryAfter))
+            {
+                http.RequestServices.GetRequiredService<IAuthenticationSecurityEventEmitter>().Enqueue(
+                    new AuthenticationSecurityEventInput(
+                        AuthenticationSecurityEventNames.SuspiciousActivityDetected,
+                        AuthenticationSecurityOutcomes.Detected,
+                        AuthenticationSecurityReasons.RateLimited,
+                        http.TraceIdentifier,
+                        SubjectIdentifier: identity == "anonymous" ? null : identity,
+                        NetworkAddress: http.Connection.RemoteIpAddress?.ToString(),
+                        UserAgent: http.Request.Headers.UserAgent.ToString()));
+                await http.RequestServices.GetRequiredService<ShineDbContext>().SaveChangesAsync(cancellationToken);
+            }
+        }
+        catch (Exception exception)
+        {
+            context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("Security.Authentication")
+                .LogWarning(exception, "Authentication rate-limit evidence could not be persisted.");
+        }
+
         var seconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         context.HttpContext.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-        await context.HttpContext.Response.WriteAsJsonAsync(new
-        {
-            errors = new[]
-            {
-                new { code = "rate_limit_exceeded", message = "Muitas tentativas. Aguarde antes de tentar novamente." }
-            }
-        }, cancellationToken);
+        await context.HttpContext.Response.WriteAsJsonAsync(AuthenticationErrors.Single(
+            AuthenticationErrors.RateLimitExceeded,
+            "Muitas tentativas. Aguarde antes de tentar novamente."), cancellationToken);
     }
 
     private static bool ValidateCors(ApiCorsOptions options, IHostEnvironment environment)
@@ -191,5 +262,27 @@ public static class SecurityConfiguration
         }
 
         return true;
+    }
+}
+
+public interface IRateLimitEvidenceGate
+{
+    bool TryAcquire(string partition, DateTime nowUtc, TimeSpan windowRemaining);
+}
+
+public sealed class RateLimitEvidenceGate : IRateLimitEvidenceGate
+{
+    private readonly ConcurrentDictionary<string, DateTime> expirations = new(StringComparer.Ordinal);
+
+    public bool TryAcquire(string partition, DateTime nowUtc, TimeSpan windowRemaining)
+    {
+        var expiresAt = nowUtc.Add(windowRemaining > TimeSpan.Zero ? windowRemaining : TimeSpan.FromSeconds(1));
+        while (true)
+        {
+            if (!expirations.TryGetValue(partition, out var current))
+                return expirations.TryAdd(partition, expiresAt);
+            if (current > nowUtc) return false;
+            if (expirations.TryUpdate(partition, expiresAt, current)) return true;
+        }
     }
 }

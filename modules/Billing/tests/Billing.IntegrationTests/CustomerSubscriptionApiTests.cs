@@ -170,7 +170,7 @@ public sealed class CustomerSubscriptionApiTests(DatabaseFixture fixture)
     {
         var options = Options.Create(new JwtOptions { Secret = JwtSecret, Issuer = "Shine", Audience = "Shine.Api", AccessTokenMinutes = 5 });
         return new AuthenticationHeaderValue("Bearer", new JwtAccessTokenService(options, new JwtSigningKeyRing(options))
-            .Create(userId, tenantId, userTenantId, []).Token);
+            .Create(userId, Guid.NewGuid(), tenantId, userTenantId, []).Token);
     }
 
     private string ConnectionString() => fixture.ConnectionString;

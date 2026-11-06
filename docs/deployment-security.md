@@ -24,7 +24,10 @@ Toda exceção à política precisa registrar responsável, justificativa, escop
 - RabbitMQ, quando habilitado, possui usuário dedicado e senha não padrão.
 - `PasswordRecovery__MockDelivery=false`.
 - CORS contém apenas as origens HTTPS esperadas.
+- `Cors__AllowCredentials=true` e `WebSession__AllowLegacyBodyTransport=false`.
+- O key ring do ASP.NET Core Data Protection é persistente e compartilhado entre todas as instâncias da API.
 - Logs e artefatos de CI não contêm valores de configuração sensíveis.
 - O responsável pela implantação confirmou plano e responsáveis de rotação.
 
 O fail-fast da aplicação é uma última barreira contra configuração acidental; ele não substitui controles do secret manager, revisão de deploy e rotação operacional.
+* Frontend e API devem permanecer no mesmo site registrável configurado em `WebSession:SiteDomain`; a API valida `WebSession:PublicApiOrigin` e todas as origens CORS na inicialização.
